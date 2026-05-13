@@ -1,6 +1,9 @@
 const { ActivityLog } = require('../models');
+const { AppError } = require('../middleware/auth');
 const { hasPermission, PERMISSIONS } = require('../config/permissions');
 const { isValidId } = require('../utils/ids');
+const { success } = require('../utils/response');
+const log = require('../utils/logger').child('activity');
 
 function buildFilter({ activity, userId, organizationId, startDate, endDate, search }) {
   const filter = {};
@@ -16,8 +19,12 @@ function buildFilter({ activity, userId, organizationId, startDate, endDate, sea
   return filter;
 }
 
+// All endpoints return the standard `{ success, message, data }` envelope.
+// Previously these used bare `res.json({...})` shapes, which forced every
+// client to special-case the activity-log endpoints. Normalised so the
+// envelope contract is uniform across the API.
 class ActivityController {
-  static async getAll(req, res) {
+  static async getAll(req, res, next) {
     try {
       const page = parseInt(req.query.page, 10) || 1;
       const limit = parseInt(req.query.limit, 10) || 50;
@@ -34,50 +41,51 @@ class ActivityController {
         ActivityLog.countDocuments(filter)
       ]);
 
-      res.json({
+      return success(res, 'OK', {
         activities,
-        pagination: {
-          page, limit, total, totalPages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
       });
     } catch (err) {
-      console.error('Error fetching activity logs:', err);
-      res.status(500).json({ error: 'Failed to fetch activity logs', message: err.message });
+      log.error('getAll failed', err, { userId: req.user?.id });
+      next(err);
     }
   }
 
-  static async getActivityTypes(req, res) {
+  static async getActivityTypes(req, res, next) {
     try {
       const activities = await ActivityLog.distinct('activity');
       activities.sort();
-      res.json({ activities });
+      return success(res, 'OK', { activities });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch activity types', message: err.message });
+      log.error('getActivityTypes failed', err);
+      next(err);
     }
   }
 
-  static async getUsers(req, res) {
+  static async getUsers(req, res, next) {
     try {
       const rows = await ActivityLog.aggregate([
         { $group: { _id: '$user_id', user_name: { $first: '$user_name' } } },
         { $sort: { user_name: 1 } }
       ]);
       const users = rows.map((r) => ({ user_id: r._id ? String(r._id) : null, user_name: r.user_name }));
-      res.json({ users });
+      return success(res, 'OK', { users });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch users', message: err.message });
+      log.error('getUsers failed', err);
+      next(err);
     }
   }
 
-  static async getById(req, res) {
+  static async getById(req, res, next) {
     try {
       const { id } = req.params;
-      if (!isValidId(id)) return res.status(400).json({ error: 'Invalid id' });
+      if (!isValidId(id)) return next(new AppError('Invalid id', 400));
       const activity = await ActivityLog.findById(id).lean();
-      if (!activity) return res.status(404).json({ error: 'Activity log not found' });
-      res.json({ activity });
+      if (!activity) return next(new AppError('Activity log not found', 404));
+      return success(res, 'OK', { activity });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch activity log', message: err.message });
+      log.error('getById failed', err, { id: req.params.id });
+      next(err);
     }
   }
 }

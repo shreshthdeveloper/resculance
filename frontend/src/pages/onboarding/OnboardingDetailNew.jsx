@@ -185,7 +185,7 @@ export default function OnboardingDetail() {
       console.log('📩 Types - current:', typeof sessionId, 'event:', typeof data.sessionId);
       
       // Compare both as strings to handle type differences
-      if (String(data.sessionId) === String(sessionId) || data.sessionId === parseInt(sessionId)) {
+      if (String(data.sessionId) === String(sessionId)) {
         console.log('✅ Session IDs match! Refreshing data...');
         // Re-fetch session data
         fetchSessionData();
@@ -197,7 +197,7 @@ export default function OnboardingDetail() {
     const handleSessionDataDeleted = (data) => {
       console.log('🗑️ Session data deleted event received:', data);
       // Compare both as strings to handle type differences
-      if (String(data.sessionId) === String(sessionId) || data.sessionId === parseInt(sessionId)) {
+      if (String(data.sessionId) === String(sessionId)) {
         console.log('✅ Session IDs match! Refreshing data...');
         // Re-fetch session data
         fetchSessionData();
@@ -206,7 +206,7 @@ export default function OnboardingDetail() {
 
     const handleSessionStatusUpdate = (data) => {
       console.log('📊 Session status update:', data);
-      if (String(data.sessionId) === String(sessionId) || data.sessionId === parseInt(sessionId)) {
+      if (String(data.sessionId) === String(sessionId)) {
         setSession(prev => ({ ...prev, status: data.status }));
       }
     };
@@ -214,7 +214,7 @@ export default function OnboardingDetail() {
     const handleSessionEnded = (data) => {
       console.log('🛑 Session ended event received:', data);
       // Check if this event is for the current session
-      if (String(data.sessionId) === String(sessionId) || data.sessionId === parseInt(sessionId)) {
+      if (String(data.sessionId) === String(sessionId)) {
         console.log('✅ This session has been ended. Redirecting to onboarding page...');
         toast.info(data.message || 'This session has been ended');
         // Small delay to allow user to see the message before redirect

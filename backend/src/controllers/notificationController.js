@@ -1,6 +1,12 @@
 const { Notification } = require('../models');
+const { AppError } = require('../middleware/auth');
 const { isValidId } = require('../utils/ids');
+const { success } = require('../utils/response');
+const log = require('../utils/logger').child('notification');
 
+// All endpoints return the standard `{ success, message, data }` envelope.
+// Previously these used bare `res.json({...})` which forced every client
+// to special-case the notifications API. Normalised here for consistency.
 class NotificationController {
   static async getNotifications(req, res, next) {
     try {
@@ -10,8 +16,9 @@ class NotificationController {
         .sort({ created_at: -1 })
         .limit(limit)
         .lean();
-      res.json({ notifications });
+      return success(res, 'OK', { notifications });
     } catch (err) {
+      log.error('getNotifications failed', err, { userId: req.user?.id });
       next(err);
     }
   }
@@ -22,8 +29,9 @@ class NotificationController {
       const notifications = await Notification.find({ user_id: userId, is_read: false })
         .sort({ created_at: -1 })
         .lean();
-      res.json({ notifications });
+      return success(res, 'OK', { notifications });
     } catch (err) {
+      log.error('getUnreadNotifications failed', err, { userId: req.user?.id });
       next(err);
     }
   }
@@ -32,8 +40,9 @@ class NotificationController {
     try {
       const userId = req.user.id;
       const count = await Notification.countDocuments({ user_id: userId, is_read: false });
-      res.json({ count });
+      return success(res, 'OK', { count });
     } catch (err) {
+      log.error('getUnreadCount failed', err, { userId: req.user?.id });
       next(err);
     }
   }
@@ -41,13 +50,14 @@ class NotificationController {
   static async markAsRead(req, res, next) {
     try {
       const { id } = req.params;
-      if (!isValidId(id)) return res.status(400).json({ message: 'Invalid id' });
+      if (!isValidId(id)) return next(new AppError('Invalid id', 400));
       await Notification.findOneAndUpdate(
         { _id: id, user_id: req.user.id },
         { is_read: true, read_at: new Date() }
       );
-      res.json({ message: 'Notification marked as read' });
+      return success(res, 'Notification marked as read');
     } catch (err) {
+      log.error('markAsRead failed', err, { id: req.params.id });
       next(err);
     }
   }
@@ -58,8 +68,9 @@ class NotificationController {
         { user_id: req.user.id, is_read: false },
         { is_read: true, read_at: new Date() }
       );
-      res.json({ message: 'All notifications marked as read' });
+      return success(res, 'All notifications marked as read');
     } catch (err) {
+      log.error('markAllAsRead failed', err, { userId: req.user?.id });
       next(err);
     }
   }
@@ -67,10 +78,11 @@ class NotificationController {
   static async deleteNotification(req, res, next) {
     try {
       const { id } = req.params;
-      if (!isValidId(id)) return res.status(400).json({ message: 'Invalid id' });
+      if (!isValidId(id)) return next(new AppError('Invalid id', 400));
       await Notification.findOneAndDelete({ _id: id, user_id: req.user.id });
-      res.json({ message: 'Notification deleted' });
+      return success(res, 'Notification deleted');
     } catch (err) {
+      log.error('deleteNotification failed', err, { id: req.params.id });
       next(err);
     }
   }
@@ -78,8 +90,9 @@ class NotificationController {
   static async deleteAllNotifications(req, res, next) {
     try {
       await Notification.deleteMany({ user_id: req.user.id });
-      res.json({ message: 'All notifications deleted' });
+      return success(res, 'All notifications deleted');
     } catch (err) {
+      log.error('deleteAllNotifications failed', err, { userId: req.user?.id });
       next(err);
     }
   }

@@ -2,34 +2,41 @@
 // VIEW_DASHBOARD on the backend. The list supports filters by user, type,
 // action, organization, date range.
 //
-// NOTE: the activity controller returns BARE shapes (no `{ success, data }`
-// envelope) — e.g. `{ activities, pagination }` and `{ activities: [...] }`
-// for the distinct-types endpoint. Read from `res.data` directly.
+// The backend now returns the standard envelope: { success, message, data }.
+// The pre-refactor server returned bare shapes ({ activities, pagination }),
+// so we tolerate both for one deploy window.
 
 import { api } from './client';
+
+function unwrap(res, fallback = {}) {
+  // Modern envelope first; fall back to the legacy bare shape.
+  return res.data?.data ?? res.data ?? fallback;
+}
 
 export async function listActivities(params = {}) {
   // Supported params (backend):
   //   userId, type, action, organizationId, search, limit, page,
   //   startDate, endDate.
   const res = await api.get('/activities', { params });
-  return res.data ?? { activities: [], pagination: null };
+  const d = unwrap(res, { activities: [], pagination: null });
+  return { activities: d.activities ?? [], pagination: d.pagination ?? null };
 }
 
 export async function getActivity(id) {
   const res = await api.get(`/activities/${id}`);
-  return res.data?.activity ?? res.data;
+  const d = unwrap(res, {});
+  return d.activity ?? d;
 }
 
 // Returns the list of distinct activity_type values present in the DB.
-// Used to populate the Type filter chips. Backend returns { activities: [...] }.
+// Used to populate the Type filter chips.
 export async function listActivityTypes() {
   const res = await api.get('/activities/types');
-  return res.data?.activities ?? [];
+  return unwrap(res, {}).activities ?? [];
 }
 
 // Returns a slim list of users for the User filter dropdown.
 export async function listActivityUsers() {
   const res = await api.get('/activities/users');
-  return res.data?.users ?? [];
+  return unwrap(res, {}).users ?? [];
 }

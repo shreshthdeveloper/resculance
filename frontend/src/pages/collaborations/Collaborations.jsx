@@ -31,22 +31,60 @@ import useWithGlobalLoader from '../../hooks/useWithGlobalLoader';
 
 // --- Validation Schema ---
 
+// Org IDs are Mongo ObjectId strings (24-char hex) — NOT numbers. The
+// original schema used `yup.number()` from the MySQL era when IDs were
+// integers. That now fails with
+//   "hospitalId must be a `number` type, but the final value was: `NaN`
+//    (cast from the value `"6a037a8831a7964b2059520f"`)"
+// because Yup calls Number(hex) → NaN. We validate as 24-char hex strings
+// so a missing pick still fails (empty string → required message) but a
+// valid ObjectId passes through.
+const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
+const objectId = (label) => yup
+  .string()
+  .trim()
+  .matches(OBJECT_ID_RE, { message: `${label} is required`, excludeEmptyString: true });
+
+// Two valid submit shapes:
+//   1. Superadmin path: { hospitalId, fleetId } — both required, no targetOrgId.
+//   2. Hospital/Fleet admin path: { targetOrgId } — single field (the counterpart org).
+//
+// We could branch with `.when('$isSuper', ...)` but that depends on the
+// resolver context being live, and stale context has bitten us before.
+// Instead, mark every ID `notRequired()` at the field level and enforce
+// the "must have one shape OR the other" rule in a single object-level
+// `.test()`. That makes validation work even if the context is missing,
+// and the test attaches the error to the field the user actually sees
+// blank so the inline message is helpful.
 const collaborationSchema = yup.object({
-  // For non-superadmin users we require a single targetOrgId (they pick the counterpart org).
-  // For superadmin users, targetOrgId is not required; instead both hospitalId and fleetId are required.
-  targetOrgId: yup.number().when('$isSuper', ([isSuper], schema) => {
-    return isSuper ? schema.notRequired() : schema.typeError('Organization is required').required('Organization is required');
-  }),
-  // hospitalId is required only when superadmin is creating the partnership
-  hospitalId: yup.number().when('$isSuper', ([isSuper], schema) => {
-    return isSuper ? schema.typeError('Hospital is required').required('Hospital is required') : schema.notRequired();
-  }),
-  // fleetId is required only when superadmin is creating the partnership
-  fleetId: yup.number().when('$isSuper', ([isSuper], schema) => {
-    return isSuper ? schema.typeError('Fleet is required').required('Fleet is required') : schema.notRequired();
-  }),
+  targetOrgId: objectId('Organization'),
+  hospitalId: objectId('Hospital'),
+  fleetId: objectId('Fleet'),
   terms: yup.string().required('Terms are required'),
   duration: yup.number().typeError('Duration must be a number').required('Duration is required').positive('Duration must be positive'),
+}).test('partner-fields', 'Pick a counterpart organization', function (values) {
+  const ctx = this.options.context || {};
+  const isSuper = !!ctx.isSuper;
+  const v = values || {};
+
+  if (isSuper) {
+    if (!v.hospitalId && !v.fleetId) {
+      return this.createError({ path: 'hospitalId', message: 'Hospital is required' });
+    }
+    if (!v.hospitalId) {
+      return this.createError({ path: 'hospitalId', message: 'Hospital is required' });
+    }
+    if (!v.fleetId) {
+      return this.createError({ path: 'fleetId', message: 'Fleet is required' });
+    }
+    return true;
+  }
+
+  // hospital_admin / fleet_admin: must pick the single counterpart org.
+  if (!v.targetOrgId) {
+    return this.createError({ path: 'targetOrgId', message: 'Organization is required' });
+  }
+  return true;
 });
 
 // --- Main Application Component (Collaborations) ---
@@ -91,7 +129,14 @@ export const Collaborations = () => {
     reset,
     formState: { errors },
   } = useForm({
-    resolver: yupResolver(collaborationSchema, { context: { isSuper: user?.role === 'superadmin' } }),
+    resolver: yupResolver(collaborationSchema),
+    // Pass `context` here (not as a second arg to yupResolver) so it's
+    // re-read on every validation call. The previous version captured
+    // `user?.role` at hook-init time — if the Zustand auth store hadn't
+    // rehydrated yet, `user` was null, `isSuper` was frozen as `false`,
+    // and superadmin submits failed with "Organization is required" even
+    // though they had picked both Hospital and Fleet.
+    context: { isSuper: user?.role === 'superadmin' },
   });
 
   useEffect(() => {

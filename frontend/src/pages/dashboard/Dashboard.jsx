@@ -107,8 +107,10 @@ export const Dashboard = () => {
     setLoadingActivities(true);
     try {
       const resp = await activityService.getAll({ page: 1, limit: 6 });
-      const acts = resp.data?.activities || [];
-      setRecentActivities(acts);
+      // Standard envelope: { data: { activities, pagination } }.
+      // Tolerate the pre-refactor bare shape so this still works mid-deploy.
+      const payload = resp.data?.data || resp.data || {};
+      setRecentActivities(payload.activities || []);
     } catch (err) {
       console.error('Failed to load recent activities', err);
     } finally {

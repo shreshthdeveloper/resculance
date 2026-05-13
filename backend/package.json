@@ -6,11 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "seed": "node src/database/seed-superadmin.js",
-    "seed:sample": "node src/database/seed-sample-data.js",
-    "seed:sample:wipe": "node src/database/seed-sample-data.js --wipe",
-    "migrate:mysql": "node src/database/migrate-from-mysql.js",
-    "db:reset": "node src/database/reset.js"
+    "seed:online": "node src/database/seed-superadmin-online.js"
   },
   "keywords": [
     "ambulance",

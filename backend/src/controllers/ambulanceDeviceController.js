@@ -326,7 +326,7 @@ class AmbulanceDeviceController {
               timeout: 10000,
               httpsAgent
             });
-            return res.json({ success: true, deviceType: device.device_type, data: response.data });
+            return success(res, 'OK', { deviceType: device.device_type, payload: response.data });
           } catch (apiErr) {
             return next(new AppError('Failed to fetch GPS data: ' + apiErr.message, 500));
           }
@@ -349,10 +349,9 @@ class AmbulanceDeviceController {
             // apiBase already contains /808gps (e.g. https://vehicleview.live/808gps);
             // the player path is /open/player/video.html relative to that base.
             const streamUrl = `${apiBase}/open/player/video.html?lang=en&devIdno=${encodeURIComponent(device.device_id)}&jsession=${encodeURIComponent(jsession)}`;
-            return res.json({
-              success: true,
+            return success(res, 'OK', {
               deviceType: device.device_type,
-              data: { streamUrl, jsession, deviceId: device.device_id }
+              payload: { streamUrl, jsession, deviceId: device.device_id }
             });
           } catch (apiErr) {
             return next(new AppError('Failed to fetch camera data: ' + apiErr.message, 500));
@@ -360,10 +359,9 @@ class AmbulanceDeviceController {
         }
         case 'ECG':
         case 'VITAL_MONITOR':
-          return res.json({
-            success: true,
+          return success(res, 'OK', {
             deviceType: device.device_type,
-            data: {
+            payload: {
               deviceId: device.device_id,
               deviceName: device.device_name,
               status: device.status,

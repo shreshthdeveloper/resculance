@@ -55,10 +55,12 @@ const Activity = () => {
         if (endDate) params.endDate = endDate;
 
         const response = await api.get('/activities', { params });
-        setActivities(response.data.activities || []);
+        // Standard envelope: { success, message, data: { activities, pagination } }
+        const data = response.data?.data || response.data || {};
+        setActivities(data.activities || []);
         setPagination(prev => ({
           ...prev,
-          ...response.data.pagination
+          ...(data.pagination || {})
         }));
       } catch (error) {
         toast.error('Failed to fetch activities');
@@ -76,8 +78,12 @@ const Activity = () => {
         api.get('/activities/types'),
         api.get('/activities/users')
       ]);
-      setActivityTypes(typesRes.data.activities || []);
-      setUsers(usersRes.data.users || []);
+      // Standard envelope after the backend refactor; tolerate the legacy
+      // bare shape so an older API server still works during deploy windows.
+      const typesData = typesRes.data?.data || typesRes.data || {};
+      const usersData = usersRes.data?.data || usersRes.data || {};
+      setActivityTypes(typesData.activities || []);
+      setUsers(usersData.users || []);
     } catch (error) {
       console.error('Error fetching filter options:', error);
     }

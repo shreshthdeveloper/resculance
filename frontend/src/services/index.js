@@ -486,11 +486,10 @@ export const collaborationService = {
     const response = await api.patch(`/collaborations/${id}/cancel`);
     return response;
   },
-
-  delete: async (id) => {
-    const response = await api.delete(`/collaborations/${id}`);
-    return response;
-  },
+  // No `delete` method — the backend doesn't expose `DELETE /collaborations/:id`.
+  // Cancellation is done via the PATCH /:id/cancel route above, which marks
+  // the request `cancelled` (preserving the audit trail). A prior version of
+  // this service had a dead delete() that 404'd — removed.
 };
 
 export const dashboardService = {

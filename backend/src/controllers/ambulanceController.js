@@ -513,7 +513,7 @@ class AmbulanceController {
         user_id: userId,
         is_active: true
       });
-      if (!assignment) return res.status(404).json({ success: false, message: 'Assignment not found' });
+      if (!assignment) return next(new AppError('Assignment not found', 404));
 
       const isAssigningOrg = equalIds(assignment.assigning_organization_id, req.user.organizationId);
       let isFleetOwnerOfAmbulance = false;
@@ -524,7 +524,7 @@ class AmbulanceController {
 
       const canBypass = req.user.role === 'superadmin';
       if (!canBypass && !isAssigningOrg && !isFleetOwnerOfAmbulance) {
-        return res.status(403).json({ success: false, message: 'You are not authorized to remove this assignment' });
+        return next(new AppError('You are not authorized to remove this assignment', 403));
       }
 
       assignment.is_active = false;

@@ -1,46 +1,45 @@
 import api from './api';
 
+// Backend now returns the standard `{ success, message, data }` envelope on
+// every notifications endpoint. During the deploy window where one side may
+// still be on the old code path, we tolerate the legacy bare shape too.
+const unwrap = (response, fallback = {}) =>
+  response?.data?.data ?? response?.data ?? fallback;
+
 const notificationService = {
-  // Get all notifications
   async getNotifications(limit = 50, offset = 0) {
     const response = await api.get('/notifications', { params: { limit, offset } });
-    return response.data;
+    return unwrap(response, { notifications: [] });
   },
 
-  // Get unread notifications
   async getUnreadNotifications() {
     const response = await api.get('/notifications/unread');
-    return response.data;
+    return unwrap(response, { notifications: [] });
   },
 
-  // Get unread count
   async getUnreadCount() {
     const response = await api.get('/notifications/unread-count');
-    return response.data;
+    return unwrap(response, { count: 0 });
   },
 
-  // Mark notification as read
   async markAsRead(notificationId) {
     const response = await api.patch(`/notifications/${notificationId}/read`);
-    return response.data;
+    return unwrap(response, {});
   },
 
-  // Mark all as read
   async markAllAsRead() {
     const response = await api.patch('/notifications/mark-all-read');
-    return response.data;
+    return unwrap(response, {});
   },
 
-  // Delete notification
   async deleteNotification(notificationId) {
     const response = await api.delete(`/notifications/${notificationId}`);
-    return response.data;
+    return unwrap(response, {});
   },
 
-  // Delete all notifications
   async deleteAllNotifications() {
     const response = await api.delete('/notifications');
-    return response.data;
+    return unwrap(response, {});
   }
 };
 

@@ -21,6 +21,8 @@ import {
   Moon,
   Sun,
   Shield,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import useWithGlobalLoader from '../hooks/useWithGlobalLoader';
 import { useAuthStore } from '../store/authStore';
@@ -180,7 +182,7 @@ const Sidebar = ({ isOpen, toggleSidebar, collapsed, toggleCollapse, isDesktop }
   );
 };
 
-const Topbar = ({ toggleSidebar }) => {
+const Topbar = ({ toggleSidebar, toggleCollapse, sidebarCollapsed }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
@@ -383,8 +385,28 @@ const Topbar = ({ toggleSidebar }) => {
             <span className="text-sm font-medium text-text">Welcome, {user?.firstName || 'User'}</span>
             <span className="text-xs text-text-secondary">{formatRoleName(user?.role)}</span>
           </div>
-          <button onClick={toggleSidebar} className="lg:hidden p-3 md:p-2 bg-background hover:bg-border rounded-xl transition-colors flex items-center justify-center h-10">
+          {/* Mobile (≤lg): opens the off-canvas sidebar. */}
+          <button
+            onClick={toggleSidebar}
+            className="lg:hidden p-3 md:p-2 bg-background hover:bg-border rounded-xl transition-colors flex items-center justify-center h-10"
+            aria-label="Open menu"
+          >
             <Menu className="w-5 h-5 text-text" />
+          </button>
+          {/* Desktop (lg+): visible collapse/expand toggle. The sidebar logo
+              is also clickable for the same action, and Ctrl/Cmd+B works as
+              a keyboard shortcut — this button is the discoverable surface. */}
+          <button
+            onClick={toggleCollapse}
+            className="hidden lg:flex p-2 bg-background hover:bg-border rounded-xl transition-colors items-center justify-center h-10 w-10"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar (⌘B)' : 'Collapse sidebar (⌘B)'}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="w-5 h-5 text-text-secondary" />
+            ) : (
+              <PanelLeftClose className="w-5 h-5 text-text-secondary" />
+            )}
           </button>
           {/* Placeholder for page title or breadcrumbs if needed */}
         </div>
@@ -680,7 +702,11 @@ export const MainLayout = ({ children }) => {
         <Loader />
           <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} transition-all duration-300`}>
           <Sidebar isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} collapsed={sidebarCollapsed} toggleCollapse={toggleCollapse} isDesktop={isDesktop} />
-          <Topbar toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+          <Topbar
+            toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+            toggleCollapse={toggleCollapse}
+            sidebarCollapsed={sidebarCollapsed}
+          />
 
           <main className="pt-1 px-4 pb-4">
             <motion.div
