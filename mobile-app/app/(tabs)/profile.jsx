@@ -1,9 +1,10 @@
-// Profile — user identity card on top, then a list of "settings"-style rows
-// for navigation (Settings, About) and a sign-out at the bottom.
+// Profile tab — user identity card, list of account / org actions, and a
+// danger sign-out. Hospital + fleet admins/staff get the Partnerships row.
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, View } from 'react-native';
+import { getManageTiles } from '../../src/lib/permissions';
 import { useAuth } from '../../src/store/auth';
 import { useTheme } from '../../src/theme';
 import {
@@ -13,6 +14,7 @@ import {
   Card,
   Caption,
   Screen,
+  SectionHeader,
   Small,
 } from '../../src/ui';
 
@@ -21,6 +23,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const user = useAuth((s) => s.user);
   const signOut = useAuth((s) => s.signOut);
+  const manageTiles = getManageTiles(user?.role);
 
   const onSignOut = () => {
     Alert.alert('Sign out', 'Are you sure you want to sign out?', [
@@ -38,11 +41,11 @@ export default function ProfileScreen() {
       <ScrollView
         contentContainerStyle={{
           padding: t.spacing.s5,
-          paddingBottom: t.spacing.s10,
+          paddingBottom: t.spacing.s12,
           gap: t.spacing.s4,
         }}
       >
-        {/* Identity */}
+        {/* Identity card */}
         <Card padding="s6" level={2}>
           <View style={{ alignItems: 'center' }}>
             <View
@@ -54,6 +57,7 @@ export default function ProfileScreen() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 marginBottom: t.spacing.s4,
+                overflow: 'hidden',
                 shadowColor: t.colors.primary,
                 shadowOpacity: 0.3,
                 shadowRadius: 12,
@@ -61,20 +65,46 @@ export default function ProfileScreen() {
                 elevation: 6,
               }}
             >
-              <BodyStrong color="#fff" style={{ fontSize: 30, fontWeight: '700' }}>
-                {initials}
-              </BodyStrong>
+              {user.profileImageUrl ? (
+                <Image
+                  source={{ uri: user.profileImageUrl }}
+                  style={{ width: '100%', height: '100%' }}
+                />
+              ) : (
+                <BodyStrong color="#fff" style={{ fontSize: 30, fontWeight: '700' }}>
+                  {initials}
+                </BodyStrong>
+              )}
             </View>
             <BodyStrong style={{ fontSize: 20 }}>
               {user.firstName} {user.lastName}
             </BodyStrong>
             <Small style={{ marginTop: 2 }}>{user.email}</Small>
-            <View style={{ flexDirection: 'row', gap: t.spacing.s2, marginTop: t.spacing.s3 }}>
+            <View style={{ flexDirection: 'row', gap: t.spacing.s2, marginTop: t.spacing.s3, flexWrap: 'wrap', justifyContent: 'center' }}>
               <Badge label={user.role.replace('_', ' ')} tone="primary" />
               {user.organization ? (
-                <Badge label={user.organization.type} tone="neutral" />
+                <Badge label={user.organization.type?.replace('_', ' ') ?? 'org'} tone="neutral" />
               ) : null}
             </View>
+            <Pressable onPress={() => router.push('/edit-profile')} hitSlop={6}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginTop: t.spacing.s4,
+                  paddingHorizontal: t.spacing.s4,
+                  paddingVertical: t.spacing.s2,
+                  borderRadius: t.radius.pill,
+                  backgroundColor: t.colors.primaryTint,
+                }}
+              >
+                <Ionicons name="create-outline" size={16} color={t.colors.primary} />
+                <Small color={t.colors.primary} style={{ fontWeight: '600' }}>
+                  Edit profile
+                </Small>
+              </View>
+            </Pressable>
           </View>
         </Card>
 
@@ -87,26 +117,65 @@ export default function ProfileScreen() {
           </Card>
         ) : null}
 
-        {/* Settings list */}
-        <View style={{ gap: t.spacing.s2 }}>
-          <ListRow
-            icon="settings-outline"
-            label="Settings"
-            sub="Theme, notifications, account"
-            onPress={() => router.push('/settings')}
-          />
-          <ListRow
-            icon="information-circle-outline"
-            label="About"
-            sub="Version, links, credits"
-            onPress={() => router.push('/about')}
-          />
-          <ListRow
-            icon="help-circle-outline"
-            label="Help & support"
-            sub="Get in touch with your administrator"
-            onPress={() => Alert.alert('Help', 'Contact your organization admin for help.')}
-          />
+        {/* Manage section. Sourced from src/lib/permissions.js so each
+            role sees exactly what the web sidebar would show. */}
+        {manageTiles.length > 0 ? (
+          <View>
+            <SectionHeader title="Manage" />
+            <View style={{ gap: t.spacing.s2 }}>
+              {manageTiles.map((tile) => (
+                <ListRow
+                  key={tile.key}
+                  icon={`${tile.icon}-outline`}
+                  label={tile.label}
+                  sub={tile.sub}
+                  onPress={() => router.push(tile.route)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Account section */}
+        <View>
+          <SectionHeader title="Account" />
+          <View style={{ gap: t.spacing.s2 }}>
+            <ListRow
+              icon="lock-closed-outline"
+              label="Change password"
+              sub="Update your sign-in password"
+              onPress={() => router.push('/change-password')}
+            />
+            <ListRow
+              icon="settings-outline"
+              label="Settings"
+              sub="Theme, connectivity, account"
+              onPress={() => router.push('/settings')}
+            />
+          </View>
+        </View>
+
+        {/* App section */}
+        <View>
+          <SectionHeader title="App" />
+          <View style={{ gap: t.spacing.s2 }}>
+            <ListRow
+              icon="information-circle-outline"
+              label="About"
+              sub="Version, links, credits"
+              onPress={() => router.push('/about')}
+            />
+            <ListRow
+              icon="help-circle-outline"
+              label="Help & support"
+              sub="Email us at distrx.io@gmail.com"
+              onPress={() =>
+                Linking.openURL('mailto:distrx.io@gmail.com?subject=Resulance%20help').catch(() =>
+                  Alert.alert('Help', 'Email distrx.io@gmail.com for support.'),
+                )
+              }
+            />
+          </View>
         </View>
 
         <Button
@@ -131,10 +200,7 @@ function ListRow({ icon, label, sub, onPress }) {
   return (
     <Pressable onPress={onPress}>
       {({ pressed }) => (
-        <Card
-          padding="s4"
-          style={pressed ? { opacity: 0.85 } : null}
-        >
+        <Card padding="s4" style={pressed ? { opacity: 0.85 } : null}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s3 }}>
             <View
               style={{

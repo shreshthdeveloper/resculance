@@ -1,20 +1,22 @@
 const { AppError } = require('./auth');
+const logger = require('../utils/logger').child('http');
 
-const errorHandler = (err, req, res, next) => {
+// Multer surfaces upload-specific failures with a distinctive code. Map
+// them to clean 4xx responses so the client sees "File too large" instead
+// of an opaque 500.
+const MULTER_MESSAGES = {
+  LIMIT_FILE_SIZE: 'Uploaded file is too large.',
+  LIMIT_UNEXPECTED_FILE: 'Unexpected file field.',
+  LIMIT_PART_COUNT: 'Too many parts in the upload.',
+  LIMIT_FILE_COUNT: 'Too many files.',
+  LIMIT_FIELD_KEY: 'Field name is too long.',
+  LIMIT_FIELD_VALUE: 'Field value is too long.',
+  LIMIT_FIELD_COUNT: 'Too many fields.'
+};
+
+const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused-vars
   let error = err;
   let statusCode = err.statusCode || 500;
-
-  if (process.env.NODE_ENV === 'development') {
-    console.error('Error Stack:', err.stack);
-  } else {
-    console.error('Error:', {
-      message: err.message,
-      statusCode,
-      path: req.path,
-      method: req.method,
-      timestamp: new Date().toISOString()
-    });
-  }
 
   // Mongo duplicate key
   if (err.code === 11000) {
@@ -53,6 +55,14 @@ const errorHandler = (err, req, res, next) => {
     statusCode = 400;
   }
 
+  // Multer errors (file too large, wrong field, etc.). `err.name` is
+  // 'MulterError' regardless of the specific failure.
+  if (err.name === 'MulterError') {
+    const friendly = MULTER_MESSAGES[err.code] || err.message || 'Upload failed';
+    error = new AppError(friendly, 400);
+    statusCode = 400;
+  }
+
   // JWT errors (backup — auth middleware handles them first)
   if (err.name === 'JsonWebTokenError') {
     error = new AppError('Invalid token. Please log in again.', 401);
@@ -61,6 +71,21 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'TokenExpiredError') {
     error = new AppError('Your token has expired. Please log in again.', 401);
     statusCode = 401;
+  }
+
+  // Log every error with consistent shape. 5xx and unexpected ones get
+  // the full stack; 4xx are noisy operational events so we log them at
+  // `warn` without the stack to keep the signal-to-noise ratio sane.
+  const logMeta = {
+    method: req.method,
+    path: req.originalUrl || req.path,
+    statusCode,
+    userId: req.user?.id || null
+  };
+  if (statusCode >= 500) {
+    logger.error('request failed', err, logMeta);
+  } else if (statusCode >= 400) {
+    logger.warn('request rejected', { ...logMeta, msg: error.message, code: err.code });
   }
 
   const message = (statusCode >= 500 && process.env.NODE_ENV === 'production')

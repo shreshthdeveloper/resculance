@@ -4,11 +4,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { getMyAmbulances, listAmbulancesForOrg } from '../../src/api/ambulances';
 import { errorMessage } from '../../src/api/client';
 import { getDashboardStats } from '../../src/api/dashboard';
-import { listSessions } from '../../src/api/sessions';
+import { listSessions, offboardSession } from '../../src/api/sessions';
+import { getManageTiles } from '../../src/lib/permissions';
 import { useAuth } from '../../src/store/auth';
 import { useTheme } from '../../src/theme';
 import {
@@ -20,6 +21,7 @@ import {
   H3,
   OrgPicker,
   SectionHeader,
+  SkeletonStatGrid,
   Small,
   Screen,
   toneForStatus,
@@ -85,6 +87,32 @@ export default function DashboardScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const onQuickOffboard = (s) => {
+    Alert.alert(
+      `Offboard ${s.patient_first_name} ${s.patient_last_name}?`,
+      'Marks the session complete and releases the ambulance.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add notes first',
+          onPress: () => router.push(`/session/${s.id}`),
+        },
+        {
+          text: 'Offboard',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await offboardSession(s.id);
+              load();
+            } catch (e) {
+              Alert.alert('Failed', errorMessage(e));
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // Re-fetch when the superadmin switches "viewing as" org.
   useEffect(() => {
     if (!isSuperadmin) return;
@@ -134,7 +162,9 @@ export default function DashboardScreen() {
           </View>
         ) : null}
 
-        {/* Active operation banner — needs an org pick for superadmin. */}
+        {/* Active operation banner — needs an org pick for superadmin.
+            Surfaces View + Offboard inline so the paramedic doesn't need
+            to dive into detail to end the session. */}
         {activeSession && !orgScopedHidden ? (
           <Card
             level={2}
@@ -144,7 +174,6 @@ export default function DashboardScreen() {
               borderColor: t.colors.primary,
               marginBottom: t.spacing.s5,
             }}
-            onPress={() => router.push(`/session/${activeSession.id}`)}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s3 }}>
               <View
@@ -152,7 +181,7 @@ export default function DashboardScreen() {
                   width: 44,
                   height: 44,
                   borderRadius: 22,
-                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  backgroundColor: 'rgba(255,255,255,0.22)',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
@@ -167,16 +196,73 @@ export default function DashboardScreen() {
                   {activeSession.patient_first_name} {activeSession.patient_last_name}
                 </H3>
                 <Small color="rgba(255,255,255,0.85)">
-                  {activeSession.status.replace('_', ' ')} · tap to open
+                  {activeSession.status.replace('_', ' ')}
                 </Small>
               </View>
-              <Ionicons name="chevron-forward" color="#fff" size={22} />
+            </View>
+
+            <View
+              style={{
+                flexDirection: 'row',
+                gap: t.spacing.s2,
+                marginTop: t.spacing.s4,
+              }}
+            >
+              <Pressable
+                onPress={() => router.push(`/session/${activeSession.id}`)}
+                style={({ pressed }) => [
+                  {
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: t.spacing.s3,
+                    borderRadius: t.radius.lg,
+                    backgroundColor: 'rgba(255,255,255,0.22)',
+                  },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Ionicons name="eye-outline" color="#fff" size={16} />
+                <Small color="#fff" style={{ fontWeight: '700' }}>
+                  View
+                </Small>
+              </Pressable>
+              <Pressable
+                onPress={() => onQuickOffboard(activeSession)}
+                style={({ pressed }) => [
+                  {
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: t.spacing.s3,
+                    borderRadius: t.radius.lg,
+                    backgroundColor: '#fff',
+                  },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Ionicons name="exit-outline" color={t.colors.primary} size={16} />
+                <Small color={t.colors.primary} style={{ fontWeight: '700' }}>
+                  Offboard
+                </Small>
+              </Pressable>
             </View>
           </Card>
         ) : null}
 
         {/* Stat grid */}
-        {statCards.length > 0 && (
+        {stats == null && !orgScopedHidden ? (
+          <>
+            <SectionHeader title="Overview" />
+            <View style={{ marginBottom: t.spacing.s5 }}>
+              <SkeletonStatGrid count={4} />
+            </View>
+          </>
+        ) : statCards.length > 0 ? (
           <>
             <SectionHeader title="Overview" />
             <View
@@ -192,7 +278,7 @@ export default function DashboardScreen() {
               ))}
             </View>
           </>
-        )}
+        ) : null}
 
         {/* My ambulance shortcut — hidden until a superadmin picks an org. */}
         {!orgScopedHidden ? (
@@ -247,29 +333,21 @@ export default function DashboardScreen() {
           </>
         ) : null}
 
-        {/* Quick actions */}
-        <SectionHeader title="Quick actions" style={{ marginTop: t.spacing.s5 }} />
+        {/* Manage — every CRUD/admin destination the user is allowed to
+            reach, in the same order as the web sidebar. Tiles are derived
+            from src/lib/permissions.js so this stays in sync with the web
+            without per-role conditionals scattered through the file. */}
+        <SectionHeader title="Manage" style={{ marginTop: t.spacing.s5 }} />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.s3 }}>
-          <QuickAction
-            icon="add-circle"
-            label="Onboard patient"
-            onPress={() => router.push('/onboard')}
-          />
-          <QuickAction
-            icon="people"
-            label="Browse patients"
-            onPress={() => router.push('/onboard')}
-          />
-          <QuickAction
-            icon="pulse"
-            label="All sessions"
-            onPress={() => router.push('/sessions')}
-          />
-          <QuickAction
-            icon="settings"
-            label="Settings"
-            onPress={() => router.push('/settings')}
-          />
+          {getManageTiles(user?.role).map((tile) => (
+            <QuickAction
+              key={tile.key}
+              icon={tile.icon}
+              label={tile.label}
+              sub={tile.sub}
+              onPress={() => router.push(tile.route)}
+            />
+          ))}
         </View>
 
         {err ? (
@@ -278,6 +356,43 @@ export default function DashboardScreen() {
           </Small>
         ) : null}
       </ScrollView>
+
+      {/* Floating Onboard CTA — primary action regardless of where the
+          user is on the Home scroll position. Bottom-right (standard FAB
+          pattern) so it never overlaps a tab icon. */}
+      {!orgScopedHidden ? (
+        <Pressable
+          onPress={() => router.push('/onboard')}
+          accessibilityRole="button"
+          accessibilityLabel="Onboard patient"
+          style={({ pressed }) => [
+            {
+              position: 'absolute',
+              right: t.spacing.s5,
+              bottom: t.spacing.s5,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingLeft: 16,
+              paddingRight: 18,
+              paddingVertical: 14,
+              borderRadius: 28,
+              backgroundColor: t.colors.primary,
+              shadowColor: t.colors.primary,
+              shadowOpacity: 0.4,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              elevation: 8,
+            },
+            pressed && { transform: [{ scale: 0.96 }], opacity: 0.92 },
+          ]}
+        >
+          <Ionicons name="add-circle" color="#fff" size={22} />
+          <Small color="#fff" style={{ fontWeight: '700', fontSize: 14 }}>
+            Onboard
+          </Small>
+        </Pressable>
+      ) : null}
     </Screen>
   );
 }
@@ -313,30 +428,35 @@ function StatCard({ label, value, icon, tone }) {
   );
 }
 
-function QuickAction({ icon, label, onPress }) {
+function QuickAction({ icon, label, sub, onPress }) {
   const t = useTheme();
   return (
     <Card
       onPress={onPress}
       padding="s4"
-      style={{ width: HALF, alignItems: 'center' }}
+      style={{ width: HALF }}
     >
       <View
         style={{
-          width: 44,
-          height: 44,
-          borderRadius: 22,
+          width: 40,
+          height: 40,
+          borderRadius: 10,
           backgroundColor: t.colors.primaryTint,
           alignItems: 'center',
           justifyContent: 'center',
           marginBottom: t.spacing.s3,
         }}
       >
-        <Ionicons name={icon} color={t.colors.primary} size={22} />
+        <Ionicons name={icon} color={t.colors.primary} size={20} />
       </View>
-      <Small color={t.colors.text} style={{ fontWeight: '600', textAlign: 'center' }}>
+      <Small color={t.colors.text} style={{ fontWeight: '700' }}>
         {label}
       </Small>
+      {sub ? (
+        <Small color={t.colors.textMuted} style={{ marginTop: 2, fontSize: 11 }}>
+          {sub}
+        </Small>
+      ) : null}
     </Card>
   );
 }

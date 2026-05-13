@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
 const { SOCKET_EVENTS } = require('../config/constants');
-const mediasoupService = require('../services/mediasoupService');
 
 let ioInstance = null;
 
@@ -30,9 +29,12 @@ const socketHandler = (io) => {
 
   io.on(SOCKET_EVENTS.CONNECTION, (socket) => {
     console.log(`✅ Socket connected: user=${socket.user.id} role=${socket.user.role}`);
-    socket.activeVideoSessions = new Set();
 
     socket.join(`user_${socket.user.id}`);
+    // Auto-join the user's organization room so org-scoped broadcasts
+    // (e.g. session offboarded notifications to the sessions list) reach
+    // every authenticated socket from that org without an extra handshake.
+    if (socket.user.organizationId) socket.join(`org_${socket.user.organizationId}`);
 
     socket.on(SOCKET_EVENTS.JOIN_AMBULANCE, (data = {}) => {
       const { ambulanceId } = data;
@@ -196,149 +198,12 @@ const socketHandler = (io) => {
       });
     });
 
-    // Multi-participant video rooms
-    socket.on('join_video_room', (data = {}) => {
-      const { sessionId } = data;
-      if (!sessionId) return;
-      const roomName = `video_session_${sessionId}`;
-      socket.join(roomName);
-
-      const room = io.sockets.adapter.rooms.get(roomName);
-      const participants = [];
-      if (room) {
-        for (const socketId of room) {
-          const s = io.sockets.sockets.get(socketId);
-          if (s && s.user && s.user.id !== socket.user.id) {
-            participants.push({
-              id: s.user.id,
-              firstName: s.user.firstName,
-              lastName: s.user.lastName,
-              role: s.user.role
-            });
-          }
-        }
-      }
-
-      socket.emit('video_room_joined', { sessionId, participants });
-      socket.to(roomName).emit('user_joined_video', {
-        sessionId,
-        userId: socket.user.id,
-        firstName: socket.user.firstName,
-        lastName: socket.user.lastName,
-        role: socket.user.role,
-        timestamp: new Date().toISOString()
-      });
-      socket.activeVideoSessions.add(sessionId);
-    });
-
-    socket.on('leave_video_room', async (data = {}) => {
-      const { sessionId } = data;
-      if (!sessionId) return;
-      const roomName = `video_session_${sessionId}`;
-      socket.leave(roomName);
-      try { await mediasoupService.cleanupPeer(sessionId, socket.user.id); } catch (e) { console.error(e); }
-      socket.activeVideoSessions.delete(sessionId);
-      socket.to(roomName).emit('user_left_video', {
-        sessionId,
-        userId: socket.user.id,
-        firstName: socket.user.firstName,
-        lastName: socket.user.lastName,
-        timestamp: new Date().toISOString()
-      });
-    });
-
-    socket.on('webrtc_signal', (data = {}) => {
-      const { sessionId, targetUserId, signalType, signalData } = data;
-      if (!sessionId) return;
-      const payload = {
-        sessionId,
-        fromUserId: socket.user.id,
-        fromUserFirstName: socket.user.firstName,
-        fromUserLastName: socket.user.lastName,
-        signalType,
-        signalData,
-        timestamp: new Date().toISOString()
-      };
-      if (targetUserId) {
-        io.to(`user_${targetUserId}`).emit('webrtc_signal', payload);
-      } else {
-        socket.to(`video_session_${sessionId}`).emit('webrtc_signal', payload);
-      }
-    });
-
-    // --- Mediasoup SFU ---
-    socket.on('getRouterRtpCapabilities', async (data = {}, cb) => {
-      try {
-        const rtpCapabilities = await mediasoupService.getRtpCapabilities(data.sessionId);
-        cb && cb({ success: true, rtpCapabilities });
-      } catch (e) {
-        cb && cb({ success: false, error: e.message });
-      }
-    });
-
-    socket.on('createWebRtcTransport', async (data = {}, cb) => {
-      try {
-        const opts = await mediasoupService.createWebRtcTransport(data.sessionId, socket.user.id);
-        cb && cb({ success: true, ...opts });
-      } catch (e) {
-        cb && cb({ success: false, error: e.message });
-      }
-    });
-
-    socket.on('connectWebRtcTransport', async (data = {}, cb) => {
-      try {
-        await mediasoupService.connectTransport(data.transportId, data.dtlsParameters);
-        cb && cb({ success: true });
-      } catch (e) {
-        cb && cb({ success: false, error: e.message });
-      }
-    });
-
-    socket.on('produce', async (data = {}, cb) => {
-      try {
-        const producerId = await mediasoupService.produce(
-          data.transportId, data.kind, data.rtpParameters, data.sessionId, socket.user.id
-        );
-        socket.to(`video_session_${data.sessionId}`).emit('newProducer', {
-          producerId,
-          userId: socket.user.id,
-          userName: `${socket.user.firstName || ''} ${socket.user.lastName || ''}`.trim(),
-          kind: data.kind
-        });
-        cb && cb({ success: true, producerId });
-      } catch (e) {
-        cb && cb({ success: false, error: e.message });
-      }
-    });
-
-    socket.on('consume', async (data = {}, cb) => {
-      try {
-        const params = await mediasoupService.consume(
-          data.transportId, data.producerId, data.rtpCapabilities, data.sessionId, socket.user.id
-        );
-        if (!params) return cb && cb({ success: false, error: 'Cannot consume this producer' });
-        cb && cb({ success: true, ...params });
-      } catch (e) {
-        cb && cb({ success: false, error: e.message });
-      }
-    });
-
-    socket.on('resumeConsumer', async (data = {}, cb) => {
-      try { await mediasoupService.resumeConsumer(data.consumerId); cb && cb({ success: true }); }
-      catch (e) { cb && cb({ success: false, error: e.message }); }
-    });
-    socket.on('pauseConsumer', async (data = {}, cb) => {
-      try { await mediasoupService.pauseConsumer(data.consumerId); cb && cb({ success: true }); }
-      catch (e) { cb && cb({ success: false, error: e.message }); }
-    });
-    socket.on('getProducers', (data = {}, cb) => {
-      try {
-        const producers = mediasoupService.getProducersInSession(data.sessionId, socket.user.id);
-        cb && cb({ success: true, producers });
-      } catch (e) {
-        cb && cb({ success: false, error: e.message });
-      }
-    });
+    // Video calls are handled by Jitsi (see frontend's VideoCallPanelJitsi
+    // and mobile-app's videoCall.js). The backend has no media-server role
+    // and the legacy mediasoup SFU / mesh-WebRTC signalling code paths
+    // were removed — they were orphaned (no UI rendered them) and the
+    // mediasoup worker subprocesses were the source of PID accumulation
+    // visible in the aaPanel process list.
 
     socket.on('emergency_alert', (data = {}) => {
       const { ambulanceId, sessionId, alertType, message } = data;
@@ -354,24 +219,8 @@ const socketHandler = (io) => {
       });
     });
 
-    socket.on(SOCKET_EVENTS.DISCONNECT, async (reason) => {
+    socket.on(SOCKET_EVENTS.DISCONNECT, (reason) => {
       console.log(`❌ Socket disconnected: user=${socket.user.id} reason=${reason}`);
-      if (socket.activeVideoSessions && socket.activeVideoSessions.size > 0) {
-        for (const sessionId of socket.activeVideoSessions) {
-          try {
-            await mediasoupService.cleanupPeer(sessionId, socket.user.id);
-            socket.to(`video_session_${sessionId}`).emit('user_left_video', {
-              sessionId,
-              userId: socket.user.id,
-              firstName: socket.user.firstName,
-              lastName: socket.user.lastName,
-              timestamp: new Date().toISOString()
-            });
-          } catch (e) {
-            console.error('Error cleaning up mediasoup session', sessionId, e.message);
-          }
-        }
-      }
     });
 
     socket.on('error', (error) => console.error('Socket error:', error));

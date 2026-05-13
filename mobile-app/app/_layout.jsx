@@ -24,6 +24,10 @@ import { useEffect, useMemo } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { setAuthContextProvider, setOnUnauthorized } from '../src/api/client';
+import {
+  onNotificationTap,
+  registerForPushNotifications,
+} from '../src/lib/pushNotifications';
 import { useAuth } from '../src/store/auth';
 import { useTheme } from '../src/theme';
 import { SplashScreen } from '../src/ui';
@@ -92,6 +96,25 @@ function Inner({ ready }) {
     }
   }, [ready, status, segments, router]);
 
+  // After the user is authenticated, ask for push permission. The token is
+  // cached in-memory and exposed via getCachedPushToken() so a future
+  // backend route can claim it.
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    registerForPushNotifications().catch(() => {});
+    // Tap on a notification → route to Alerts. We don't have rich deeplinks
+    // yet, but this is the right pivot point for them later.
+    const teardown = onNotificationTap((content) => {
+      const sessionId = content?.data?.sessionId;
+      if (sessionId) {
+        router.push(`/session/${sessionId}`);
+      } else {
+        router.push('/notifications');
+      }
+    });
+    return teardown;
+  }, [status, router]);
+
   const headerStyles = useMemo(
     () => ({
       headerStyle: { backgroundColor: t.colors.card },
@@ -126,10 +149,6 @@ function Inner({ ready }) {
         options={{ headerShown: true, title: 'Patient', ...headerStyles }}
       />
       <Stack.Screen
-        name="onboard/index"
-        options={{ headerShown: true, title: 'Onboard patient', ...headerStyles }}
-      />
-      <Stack.Screen
         name="onboard/new-patient"
         options={{ headerShown: true, title: 'New patient', ...headerStyles }}
       />
@@ -144,6 +163,57 @@ function Inner({ ready }) {
       <Stack.Screen
         name="about"
         options={{ headerShown: true, title: 'About', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="collaborations"
+        options={{ headerShown: true, title: 'Partnerships', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="edit-profile"
+        options={{ headerShown: true, title: 'Edit profile', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="change-password"
+        options={{ headerShown: true, title: 'Change password', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="patients"
+        options={{ headerShown: true, title: 'Patients', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="organizations"
+        options={{ headerShown: true, title: 'Organizations', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="users"
+        options={{ headerShown: true, title: 'Users', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="ambulances"
+        options={{ headerShown: true, title: 'Ambulances', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="activity"
+        options={{ headerShown: true, title: 'Activity logs', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="permissions"
+        options={{ headerShown: true, title: 'Permissions', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="onboardings"
+        options={{ headerShown: true, title: 'Onboarding', ...headerStyles }}
+      />
+      {/* Ambulance + Alerts are reachable from Home / the top-bar bell —
+          no longer bottom-tab destinations. Registered here so deep-links
+          (push-notification tap, etc.) still work. */}
+      <Stack.Screen
+        name="ambulance"
+        options={{ headerShown: true, title: 'My ambulance', ...headerStyles }}
+      />
+      <Stack.Screen
+        name="notifications"
+        options={{ headerShown: true, title: 'Alerts', ...headerStyles }}
       />
     </Stack>
   );

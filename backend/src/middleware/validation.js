@@ -57,7 +57,10 @@ const createOrganizationValidation = [
 const createAmbulanceValidation = [
   body('vehicleNumber').trim().notEmpty().withMessage('Vehicle number is required'),
   body('vehicleModel').optional().trim(),
-  body('vehicleType').optional().trim(),
+  // vehicleType must match the Ambulance schema enum — see backend/src/models/Ambulance.js
+  body('vehicleType')
+    .notEmpty().withMessage('Vehicle type is required')
+    .isIn(['BLS', 'ALS', 'SCU']).withMessage('Vehicle type must be BLS, ALS, or SCU'),
   body('organizationId').custom(mongoId)
 ];
 

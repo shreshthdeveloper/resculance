@@ -8,6 +8,31 @@ const NotificationService = require('../services/notificationService');
 const { success } = require('../utils/response');
 const { canApproveRole } = require('../config/permissions');
 const { isValidId, equalIds } = require('../utils/ids');
+const storage = require('../services/storageService');
+const log = require('../utils/logger').child('users');
+
+// Mirror of dropOldAvatar in authController — kept local to avoid creating
+// a circular import. If we add a third upload site we'll lift this into
+// a shared helper.
+async function dropOldAvatarLegacy(profileImageUrl) {
+  if (!profileImageUrl) return;
+  const cfg = storage.config();
+  const bucketTag = `/${cfg.bucket}/profiles/`;
+  if (profileImageUrl.includes(bucketTag)) {
+    const key = profileImageUrl.slice(profileImageUrl.indexOf(bucketTag) + 1).split('?')[0];
+    await storage.deleteObject(key).catch((e) => log.warn('avatar minio delete failed', { msg: e.message }));
+    return;
+  }
+  if (profileImageUrl.includes('/uploads/profiles/')) {
+    try {
+      const oldFilename = profileImageUrl.split('/uploads/profiles/').pop();
+      const oldPath = path.join(__dirname, '..', '..', 'uploads', 'profiles', oldFilename);
+      if (oldFilename && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    } catch (e) {
+      log.warn('legacy avatar disk delete failed', { msg: e.message });
+    }
+  }
+}
 
 function shapeUser(user) {
   if (!user) return null;
@@ -249,7 +274,8 @@ class UserController {
     try {
       const { id } = req.params;
       if (!isValidId(id)) return next(new AppError('Invalid user id', 400));
-      if (!req.file) return next(new AppError('No file uploaded', 400));
+      const file = req.file;
+      if (!file || !file.buffer) return next(new AppError('No file uploaded', 400));
 
       const target = await User.findById(id);
       if (!target) return next(new AppError('User not found', 404));
@@ -258,23 +284,33 @@ class UserController {
         return next(new AppError('Access denied', 403));
       }
 
-      const filename = req.file.filename;
-      const fileUrl = `${req.protocol}://${req.get('host')}/uploads/profiles/${filename}`;
-
-      if (target.profile_image_url?.includes('/uploads/profiles/')) {
-        try {
-          const oldFilename = target.profile_image_url.split('/uploads/profiles/').pop();
-          const oldPath = path.join(__dirname, '..', '..', 'uploads', 'profiles', oldFilename);
-          if (oldFilename && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        } catch (e) {
-          console.warn('Failed to remove old profile image:', e.message);
-        }
+      if (!storage.enabled()) {
+        log.error('profile upload blocked: MinIO disabled', null, { userId: id });
+        return next(new AppError('Image storage is not configured. Please contact support.', 503));
       }
 
-      target.profile_image_url = fileUrl;
+      const uploaded = await storage.uploadBuffer(
+        'profiles',
+        file.originalname,
+        file.buffer,
+        file.mimetype,
+        { prefix: String(id) }
+      );
+
+      if (target.profile_image_url) {
+        dropOldAvatarLegacy(target.profile_image_url).catch((e) =>
+          log.warn('dropOldAvatarLegacy threw', { msg: e.message })
+        );
+      }
+
+      target.profile_image_url = uploaded.publicUrl;
       await target.save();
-      return success(res, 'Profile image updated', { profileImageUrl: fileUrl });
+      log.info('profile image updated for user', { adminId: req.user.id, userId: id, key: uploaded.key });
+      return success(res, 'Profile image updated', { profileImageUrl: uploaded.publicUrl });
     } catch (err) {
+      log.error('uploadProfileImageForUser failed', err, {
+        targetUserId: req.params.id, adminId: req.user?.id
+      });
       next(err);
     }
   }

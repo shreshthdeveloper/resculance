@@ -17,10 +17,13 @@ import {
   FlatList,
   Modal,
   Pressable,
-  SafeAreaView,
   TextInput,
   View,
 } from 'react-native';
+// Use react-native-safe-area-context's SafeAreaView; RN's built-in is
+// deprecated as of RN 0.80+. The context version also respects the
+// provider tree set up in app/_layout.jsx.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { listOrganizations } from '../api/organizations';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../store/auth';

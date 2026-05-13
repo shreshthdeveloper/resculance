@@ -1,12 +1,16 @@
 const {
-  Patient, PatientSession, Ambulance, AmbulanceAssignment,
+  Patient, PatientSession, PatientSessionData, Ambulance, AmbulanceAssignment,
   Organization, VitalSign, Communication, User, Partnership
 } = require('../models');
 const { AppError } = require('../middleware/auth');
 const NotificationService = require('../services/notificationService');
+const ActivityLogService = require('../services/activityLogService');
+const { ACTIVITY_TYPES } = require('../config/constants');
 const { success } = require('../utils/response');
 const { isValidId, equalIds } = require('../utils/ids');
 const { generateCode } = require('../utils/codes');
+const log = require('../utils/logger').child('patient');
+const ACTIVE_SESSION_STATUSES = ['onboarded', 'in_transit'];
 
 // ---------- helpers ----------
 
@@ -149,16 +153,38 @@ async function userCanAccessSession(req, session) {
   return false;
 }
 
-async function offboardSession(session, offboardedBy, treatmentNotes) {
-  // Build comprehensive metadata snapshot, mirroring the original SQL implementation.
-  const full = await findFullSession(session._id || session.id);
-  await attachCrew(full);
+// Build the offboard metadata snapshot + persist the session/ambulance/patient
+// state transitions. `prePopulated` lets the caller hand in a populated
+// session it already loaded (e.g. for the access check) so we don't do a
+// redundant findFullSession round-trip.
+//
+// Writes touch three documents (session, ambulance, patient). On a replica
+// set we use a Mongo transaction; on standalone Mongo (which doesn't support
+// transactions) we fall back to sequential writes ordered most-defensively:
+// the session is written first because that's the source of truth for the
+// offboard, and ambulance/patient cleanup follows. Failures during cleanup
+// are logged but don't undo the session write.
+async function offboardSession(session, offboardedBy, treatmentNotes, prePopulated = null) {
+  const sessionId = session._id || session.id;
+
+  const full = prePopulated && String(prePopulated._id || prePopulated.id) === String(sessionId)
+    ? prePopulated
+    : await findFullSession(sessionId);
+  if (!full) throw new AppError('Session not found', 404);
+  if (!full.crew) await attachCrew(full);
+
+  const ambulanceId = full.ambulance_id?._id || full.ambulance_id;
+  const patientId = full.patient_id?._id || full.patient_id;
 
   const [offUser, onUser, ambulance, sessionDataRows] = await Promise.all([
     User.findById(offboardedBy).select('first_name last_name email role').lean(),
-    User.findById(full.onboarded_by).select('first_name last_name email role').lean(),
-    Ambulance.findById(full.ambulance_id?._id || full.ambulance_id).populate('organization_id').lean(),
-    require('../models').PatientSessionData.find({ session_id: full._id })
+    full.onboarded_by
+      ? User.findById(full.onboarded_by).select('first_name last_name email role').lean()
+      : Promise.resolve(null),
+    ambulanceId
+      ? Ambulance.findById(ambulanceId).populate('organization_id').lean()
+      : Promise.resolve(null),
+    PatientSessionData.find({ session_id: full._id })
       .populate('added_by', 'first_name last_name email role')
       .sort({ added_at: 1 })
       .lean()
@@ -170,9 +196,9 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
     content: row.content,
     addedBy: {
       id: row.added_by ? String(row.added_by._id) : null,
-      name: row.added_by ? `${row.added_by.first_name} ${row.added_by.last_name}` : 'Unknown',
-      email: row.added_by?.email,
-      role: row.added_by?.role
+      name: row.added_by ? `${row.added_by.first_name ?? ''} ${row.added_by.last_name ?? ''}`.trim() || 'Unknown' : 'Unknown',
+      email: row.added_by?.email || null,
+      role: row.added_by?.role || null
     },
     addedAt: row.added_at
   }));
@@ -180,9 +206,17 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
   const medications = sessionData.filter((d) => d.dataType === 'medication');
   const files = sessionData.filter((d) => d.dataType === 'file');
 
-  const onboardedAt = new Date(full.onboarded_at);
+  const onboardedAt = full.onboarded_at ? new Date(full.onboarded_at) : null;
   const offboardedAt = new Date();
-  const durationMinutes = Math.floor((offboardedAt - onboardedAt) / (1000 * 60));
+  const durationMinutes = onboardedAt
+    ? Math.max(0, Math.floor((offboardedAt - onboardedAt) / (1000 * 60)))
+    : null;
+
+  // Patient snapshot — full.patient_id is populated (object) or null/ObjectId
+  // if the patient was deleted before we got here. Guard every field.
+  const patientObj = (full.patient_id && typeof full.patient_id === 'object') ? full.patient_id : null;
+  const ownerOrg = (full.organization_id && typeof full.organization_id === 'object') ? full.organization_id : null;
+  const destOrg = (full.destination_hospital_id && typeof full.destination_hospital_id === 'object') ? full.destination_hospital_id : null;
 
   const metadata = {
     timeline: {
@@ -193,22 +227,22 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
       actual_arrival_time: full.actual_arrival_time
     },
     patient: {
-      id: full.patient_id?._id ? String(full.patient_id._id) : String(full.patient_id),
-      first_name: full.patient_id?.first_name,
-      last_name: full.patient_id?.last_name,
-      age: full.patient_id?.age,
-      gender: full.patient_id?.gender,
-      blood_group: full.patient_id?.blood_group,
-      medical_history: full.patient_id?.medical_history,
-      allergies: full.patient_id?.allergies,
-      current_medications: full.patient_id?.current_medications
+      id: patientObj ? String(patientObj._id) : (patientId ? String(patientId) : null),
+      first_name: patientObj?.first_name ?? null,
+      last_name: patientObj?.last_name ?? null,
+      age: patientObj?.age ?? null,
+      gender: patientObj?.gender ?? null,
+      blood_group: patientObj?.blood_group ?? null,
+      medical_history: patientObj?.medical_history ?? null,
+      allergies: patientObj?.allergies ?? null,
+      current_medications: patientObj?.current_medications ?? null
     },
     ambulance: {
-      id: ambulance ? String(ambulance._id) : null,
-      ambulance_code: ambulance?.ambulance_code,
-      registration_number: ambulance?.registration_number,
-      vehicle_model: ambulance?.vehicle_model,
-      vehicle_type: ambulance?.vehicle_type,
+      id: ambulance ? String(ambulance._id) : (ambulanceId ? String(ambulanceId) : null),
+      ambulance_code: ambulance?.ambulance_code ?? null,
+      registration_number: ambulance?.registration_number ?? null,
+      vehicle_model: ambulance?.vehicle_model ?? null,
+      vehicle_type: ambulance?.vehicle_type ?? null,
       owner_organization: ambulance?.organization_id || null
     },
     crew: {
@@ -218,11 +252,11 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
       drivers: full.drivers || []
     },
     organizations: {
-      session_owner: full.organization_id
-        ? { id: String(full.organization_id._id), name: full.organization_id.name, type: full.organization_id.type }
+      session_owner: ownerOrg
+        ? { id: String(ownerOrg._id), name: ownerOrg.name ?? null, type: ownerOrg.type ?? null }
         : null,
-      destination_hospital: full.destination_hospital_id
-        ? { id: String(full.destination_hospital_id._id), name: full.destination_hospital_id.name }
+      destination_hospital: destOrg
+        ? { id: String(destOrg._id), name: destOrg.name ?? null }
         : null
     },
     locations: {
@@ -233,7 +267,7 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
     medical: {
       chief_complaint: full.chief_complaint,
       initial_assessment: full.initial_assessment,
-      treatment_notes: treatmentNotes,
+      treatment_notes: treatmentNotes ?? null,
       outcome_status: full.outcome_status
     },
     session_data: {
@@ -245,16 +279,16 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
     },
     users: {
       onboarded_by: {
-        id: onUser ? String(onUser._id) : null,
-        name: onUser ? `${onUser.first_name} ${onUser.last_name}` : 'Unknown',
-        email: onUser?.email,
-        role: onUser?.role
+        id: onUser ? String(onUser._id) : (full.onboarded_by ? String(full.onboarded_by) : null),
+        name: onUser ? `${onUser.first_name ?? ''} ${onUser.last_name ?? ''}`.trim() || 'Unknown' : 'Unknown',
+        email: onUser?.email ?? null,
+        role: onUser?.role ?? null
       },
       offboarded_by: {
-        id: offUser ? String(offUser._id) : null,
-        name: offUser ? `${offUser.first_name} ${offUser.last_name}` : 'Unknown',
-        email: offUser?.email,
-        role: offUser?.role
+        id: offUser ? String(offUser._id) : (offboardedBy ? String(offboardedBy) : null),
+        name: offUser ? `${offUser.first_name ?? ''} ${offUser.last_name ?? ''}`.trim() || 'Unknown' : 'Unknown',
+        email: offUser?.email ?? null,
+        role: offUser?.role ?? null
       }
     },
     identifiers: {
@@ -270,13 +304,60 @@ async function offboardSession(session, offboardedBy, treatmentNotes) {
     }
   };
 
-  await PatientSession.findByIdAndUpdate(session._id || session.id, {
+  const sessionUpdate = {
     status: 'offboarded',
     offboarded_by: offboardedBy,
     offboarded_at: offboardedAt,
-    treatment_notes: treatmentNotes,
+    treatment_notes: treatmentNotes ?? null,
+    duration_minutes: durationMinutes,
     session_metadata: metadata
-  });
+  };
+  const ambulanceUpdate = { status: 'available', current_hospital_id: null };
+  const patientUpdate = { is_onboarded: false, current_session_id: null, onboarded_at: null };
+
+  // Try transactional write first; fall back to sequential writes if the
+  // current Mongo deployment doesn't support transactions (standalone).
+  const mongoose = require('mongoose');
+  let mongoSession = null;
+  try {
+    mongoSession = await mongoose.startSession();
+    await mongoSession.withTransaction(async () => {
+      await PatientSession.findByIdAndUpdate(sessionId, sessionUpdate, { session: mongoSession });
+      if (ambulanceId) await Ambulance.findByIdAndUpdate(ambulanceId, ambulanceUpdate, { session: mongoSession });
+      if (patientId) await Patient.findByIdAndUpdate(patientId, patientUpdate, { session: mongoSession });
+    });
+  } catch (err) {
+    // Transactions require a replica set / mongos. Standalone Mongo throws
+    // "Transaction numbers are only allowed on a replica set member or mongos"
+    // (error code 20). Fall back to non-transactional writes: session first,
+    // then ambulance/patient as best-effort cleanup.
+    const isUnsupported = err?.code === 20
+      || err?.codeName === 'IllegalOperation'
+      || /replica set member|mongos|Transactions are not supported/i.test(err?.message || '');
+    if (!isUnsupported) throw err;
+
+    await PatientSession.findByIdAndUpdate(sessionId, sessionUpdate);
+    if (ambulanceId) {
+      try { await Ambulance.findByIdAndUpdate(ambulanceId, ambulanceUpdate); }
+      catch (e) { log.error('offboardSession ambulance update failed', e, { ambulanceId: String(ambulanceId) }); }
+    }
+    if (patientId) {
+      try { await Patient.findByIdAndUpdate(patientId, patientUpdate); }
+      catch (e) { log.error('offboardSession patient update failed', e, { patientId: String(patientId) }); }
+    }
+  } finally {
+    if (mongoSession) mongoSession.endSession();
+  }
+
+  return {
+    sessionId: String(sessionId),
+    ambulanceId: ambulanceId ? String(ambulanceId) : null,
+    patientId: patientId ? String(patientId) : null,
+    ownerOrgId: ownerOrg ? String(ownerOrg._id) : (full.organization_id ? String(full.organization_id) : null),
+    destinationOrgId: destOrg ? String(destOrg._id) : (full.destination_hospital_id ? String(full.destination_hospital_id) : null),
+    durationMinutes,
+    metadata
+  };
 }
 
 // ---------- controller ----------
@@ -528,7 +609,7 @@ class PatientController {
 
       const activeAmbSession = await PatientSession.findOne({
         ambulance_id: ambulanceId,
-        status: { $in: ['active', 'onboarded', 'in_transit'] }
+        status: { $in: ACTIVE_SESSION_STATUSES }
       }).lean();
       if (activeAmbSession) return next(new AppError('Ambulance already has an active patient session', 400));
 
@@ -544,7 +625,7 @@ class PatientController {
 
       const patientActive = await PatientSession.findOne({
         patient_id: patientId,
-        status: { $in: ['active', 'onboarded', 'in_transit'] }
+        status: { $in: ACTIVE_SESSION_STATUSES }
       }).lean();
       if (patientActive) {
         return next(new AppError('Patient already has an active session. Offboard the current session first.', 400));
@@ -655,7 +736,7 @@ class PatientController {
           }
         }
       } catch (e) {
-        console.error('Cross-org patient sync failed:', e.message);
+        log.warn('cross-org patient sync failed', { msg: e.message });
       }
 
       // socket + notifications
@@ -671,7 +752,7 @@ class PatientController {
           lastName: patient.last_name
         });
       } catch (e) {
-        console.error('Failed to notify ambulance crew:', e.message);
+        log.warn('failed to notify ambulance crew', { msg: e.message });
       }
 
       return success(res, 'Patient onboarded successfully', {
@@ -689,39 +770,59 @@ class PatientController {
       const { treatmentNotes } = req.body;
       if (!isValidId(sessionId)) return next(new AppError('Invalid session id', 400));
 
-      const session = await PatientSession.findById(sessionId);
-      if (!session) return next(new AppError('Session not found', 404));
-      if (session.status === 'offboarded') return next(new AppError('Patient already offboarded', 400));
-
+      // Load the populated session once and reuse it for the access check
+      // and for the metadata snapshot. Avoids the duplicate findFullSession
+      // we used to do here + inside offboardSession.
       const populated = await findFullSession(sessionId);
+      if (!populated) return next(new AppError('Session not found', 404));
+      if (populated.status === 'offboarded') return next(new AppError('Patient already offboarded', 400));
+
       const allowed = await userCanAccessSession(req, populated);
       if (!allowed) return next(new AppError('You do not have permission to offboard this session', 403));
 
-      await offboardSession(session, req.user.id, treatmentNotes);
+      const result = await offboardSession({ _id: sessionId }, req.user.id, treatmentNotes, populated);
 
-      await Ambulance.findByIdAndUpdate(session.ambulance_id, {
-        status: 'available',
-        current_hospital_id: null
-      });
-      await Patient.findByIdAndUpdate(session.patient_id, {
-        is_onboarded: false,
-        current_session_id: null,
-        onboarded_at: null
-      });
+      // Activity log — non-blocking, fire-and-forget so a logger failure
+      // doesn't block the response.
+      ActivityLogService.log({
+        activity: ACTIVITY_TYPES.PATIENT_OFFBOARDED,
+        comments: `Patient offboarded from session ${populated.session_code || sessionId}`,
+        user: req.user,
+        organization: { id: result.ownerOrgId, name: populated.organization_id?.name },
+        metadata: {
+          sessionId: result.sessionId,
+          sessionCode: populated.session_code,
+          ambulanceId: result.ambulanceId,
+          patientId: result.patientId,
+          durationMinutes: result.durationMinutes,
+          destinationHospitalId: result.destinationOrgId
+        },
+        req
+      }).catch((e) => log.warn('offboard activity log failed', { msg: e.message }));
 
       const io = req.app.get('io');
       if (io) {
-        io.to(`ambulance_${session.ambulance_id}`).emit('patient_offboarded', { sessionId });
-        io.to(`session_${sessionId}`).emit('session_offboarded', { sessionId });
-        io.to(`session_${sessionId}`).emit('session_ended', {
+        const endedPayload = {
           sessionId,
           status: 'offboarded',
           message: 'This session has been ended',
           timestamp: new Date().toISOString()
-        });
+        };
+        if (result.ambulanceId) io.to(`ambulance_${result.ambulanceId}`).emit('patient_offboarded', { sessionId });
+        io.to(`session_${sessionId}`).emit('session_offboarded', { sessionId });
+        io.to(`session_${sessionId}`).emit('session_ended', endedPayload);
+        // Broadcast to org rooms so any user watching the sessions list can
+        // refresh without having joined the per-session room.
+        if (result.ownerOrgId) io.to(`org_${result.ownerOrgId}`).emit('session_offboarded', { sessionId });
+        if (result.destinationOrgId && result.destinationOrgId !== result.ownerOrgId) {
+          io.to(`org_${result.destinationOrgId}`).emit('session_offboarded', { sessionId });
+        }
       }
 
-      return success(res, 'Patient offboarded successfully');
+      return success(res, 'Patient offboarded successfully', {
+        sessionId: result.sessionId,
+        durationMinutes: result.durationMinutes
+      });
     } catch (err) {
       next(err);
     }
@@ -780,20 +881,28 @@ class PatientController {
       const limit = parseInt(req.query.limit, 10) || 50;
       const offset = parseInt(req.query.offset, 10) || 0;
 
-      // Special-case: caller asks for the single latest session of an ambulance
+      // Special-case: caller asks for the single latest session of an ambulance.
+      // `hasSession` is scoped to *active* sessions only — an offboarded
+      // session in this ambulance's history is "no longer there" from the
+      // caller's perspective. Previously this returned hasSession=true for
+      // any session in history, which made the mobile/web ambulance UI
+      // treat an offboarded vehicle as still occupied.
       if (ambulanceId && limit === 1) {
         if (!isValidId(ambulanceId)) return next(new AppError('Invalid ambulance id', 400));
-        const latest = await PatientSession.findOne({ ambulance_id: ambulanceId })
+        const latestActive = await PatientSession.findOne({
+          ambulance_id: ambulanceId,
+          status: { $in: ACTIVE_SESSION_STATUSES }
+        })
           .sort({ created_at: -1 })
           .lean();
-        if (!latest) {
+        if (!latestActive) {
           return success(res, 'OK', {
             sessions: [],
             pagination: { total: 0, limit: 1, offset: 0, hasMore: false },
             hasSession: false
           });
         }
-        const populated = await findFullSession(latest._id);
+        const populated = await findFullSession(latestActive._id);
         const allowed = await userCanAccessSession(req, populated);
         if (allowed) {
           await attachCrew(populated);
@@ -803,6 +912,8 @@ class PatientController {
             hasSession: true
           });
         }
+        // Active session exists but the caller can't see it (e.g. hospital
+        // user looking at a fleet-owned vehicle on an unrelated run).
         return success(res, 'OK', {
           sessions: [],
           pagination: { total: 0, limit: 1, offset: 0, hasMore: false },
@@ -813,7 +924,7 @@ class PatientController {
       const filter = {};
       if (ambulanceId) filter.ambulance_id = ambulanceId;
       if (status) {
-        if (status === 'active') filter.status = { $in: ['onboarded', 'in_transit'] };
+        if (status === 'active') filter.status = { $in: ACTIVE_SESSION_STATUSES };
         else filter.status = status;
       }
 
@@ -892,7 +1003,7 @@ class PatientController {
 
       const session = await PatientSession.findOne({
         patient_id: patientId,
-        status: { $in: ['active', 'onboarded', 'in_transit'] }
+        status: { $in: ACTIVE_SESSION_STATUSES }
       });
       if (!session) return next(new AppError('No active session found for this patient', 404));
 
@@ -936,7 +1047,7 @@ class PatientController {
 
       const session = await PatientSession.findOne({
         patient_id: patientId,
-        status: { $in: ['active', 'onboarded', 'in_transit'] }
+        status: { $in: ACTIVE_SESSION_STATUSES }
       });
       if (!session) return next(new AppError('No active session found for this patient', 404));
 
@@ -958,7 +1069,7 @@ class PatientController {
 
       const session = await PatientSession.findOne({
         patient_id: patientId,
-        status: { $in: ['active', 'onboarded', 'in_transit'] }
+        status: { $in: ACTIVE_SESSION_STATUSES }
       });
       if (!session) return next(new AppError('No active session found for this patient', 404));
 
@@ -1030,17 +1141,31 @@ class PatientController {
 
       const activeSession = await PatientSession.findOne({
         patient_id: id,
-        status: { $in: ['active', 'onboarded', 'in_transit'] }
+        status: { $in: ACTIVE_SESSION_STATUSES }
       });
       if (activeSession) {
-        await offboardSession(activeSession, req.user.id, null);
-        try {
-          await Ambulance.findByIdAndUpdate(activeSession.ambulance_id, {
-            status: 'available',
-            current_hospital_id: null
+        // offboardSession now handles ambulance + patient cleanup itself, so
+        // we don't need the extra ambulance update that used to live here.
+        const result = await offboardSession(
+          activeSession,
+          req.user.id,
+          'Auto-offboarded: patient deactivated'
+        );
+        const io = req.app.get('io');
+        if (io) {
+          const sid = String(activeSession._id);
+          if (result.ambulanceId) io.to(`ambulance_${result.ambulanceId}`).emit('patient_offboarded', { sessionId: sid });
+          io.to(`session_${sid}`).emit('session_offboarded', { sessionId: sid });
+          io.to(`session_${sid}`).emit('session_ended', {
+            sessionId: sid,
+            status: 'offboarded',
+            message: 'This session has been ended',
+            timestamp: new Date().toISOString()
           });
-        } catch (e) {
-          console.warn('Failed to update ambulance after patient deactivation:', e.message);
+          if (result.ownerOrgId) io.to(`org_${result.ownerOrgId}`).emit('session_offboarded', { sessionId: sid });
+          if (result.destinationOrgId && result.destinationOrgId !== result.ownerOrgId) {
+            io.to(`org_${result.destinationOrgId}`).emit('session_offboarded', { sessionId: sid });
+          }
         }
       }
 
@@ -1184,7 +1309,7 @@ class PatientController {
           await NotificationService.createBulkNotifications(notifications);
         }
       } catch (e) {
-        console.error('sendSessionMessage notification error:', e.message);
+        log.warn('sendSessionMessage notification error', { msg: e.message });
       }
 
       return success(res, 'Message sent successfully', {
@@ -1240,3 +1365,7 @@ class PatientController {
 }
 
 module.exports = PatientController;
+// Exposed so other controllers (ambulance maintenance / deactivation) can
+// reuse the metadata-capturing offboard path instead of issuing raw
+// updateMany calls that lose the snapshot, duration, and patient cleanup.
+module.exports.offboardSession = offboardSession;

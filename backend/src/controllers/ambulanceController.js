@@ -1,6 +1,7 @@
 const {
   Ambulance,
   AmbulanceAssignment,
+  AmbulanceDevice,
   Organization,
   Partnership,
   PatientSession,
@@ -9,10 +10,50 @@ const {
 const { AppError } = require('../middleware/auth');
 const NotificationService = require('../services/notificationService');
 const ActivityLogService = require('../services/activityLogService');
+const { ACTIVITY_TYPES } = require('../config/constants');
 const { success } = require('../utils/response');
 const { isValidId, equalIds, toObjectId } = require('../utils/ids');
 const { isMedicalStaff } = require('../config/permissions');
 const { generateCode } = require('../utils/codes');
+const log = require('../utils/logger').child('ambulance');
+// Lazy-required to avoid a circular import (patientController also pulls in
+// this controller's helpers transitively through models).
+const getOffboardSession = () => require('./patientController').offboardSession;
+
+const ACTIVE_SESSION_STATUSES = ['onboarded', 'in_transit'];
+const VEHICLE_TYPES = ['BLS', 'ALS', 'SCU'];
+
+// Walk every active session on the ambulance through the proper offboard
+// helper so metadata is captured, duration_minutes is set, and patient
+// onboarded flags are cleared. Returns the count of sessions actually
+// offboarded so callers can include it in the response.
+async function offboardAllActiveSessionsForAmbulance(ambulanceId, actingUserId, reason) {
+  const offboard = getOffboardSession();
+  const sessions = await PatientSession.find({
+    ambulance_id: ambulanceId,
+    status: { $in: ACTIVE_SESSION_STATUSES }
+  });
+  let count = 0;
+  for (const s of sessions) {
+    try {
+      await offboard(s, actingUserId, reason);
+      count += 1;
+    } catch (e) {
+      log.error('cascade offboard failed for session', e, {
+        sessionId: String(s._id), ambulanceId: String(ambulanceId)
+      });
+    }
+  }
+  return count;
+}
+
+async function userOwnsAmbulance(req, ambulance) {
+  if (!req?.user) return false;
+  if (req.user.role === 'superadmin') return true;
+  if (!ambulance) return false;
+  const ambOrgId = ambulance.organization_id?._id || ambulance.organization_id;
+  return equalIds(ambOrgId, req.user.organizationId);
+}
 
 // --- helpers ---
 
@@ -61,6 +102,19 @@ class AmbulanceController {
     try {
       const { vehicleNumber, vehicleModel, vehicleType } = req.body;
 
+      // Defensive validation — the route-level validator is lax on
+      // vehicleType so callers (especially the mobile app) could send
+      // mismatched values and trip a 500 deep in Mongoose. Fail fast.
+      if (!vehicleNumber || typeof vehicleNumber !== 'string' || !vehicleNumber.trim()) {
+        return next(new AppError('vehicleNumber (registration number) is required', 400));
+      }
+      if (!vehicleType) {
+        return next(new AppError(`vehicleType is required. Must be one of: ${VEHICLE_TYPES.join(', ')}`, 400));
+      }
+      if (!VEHICLE_TYPES.includes(vehicleType)) {
+        return next(new AppError(`Invalid vehicleType '${vehicleType}'. Must be one of: ${VEHICLE_TYPES.join(', ')}`, 400));
+      }
+
       const ambulanceCode = generateCode('AMB');
 
       const organizationId = req.user.role === 'superadmin'
@@ -74,8 +128,8 @@ class AmbulanceController {
       const amb = await Ambulance.create({
         organization_id: organizationId,
         ambulance_code: ambulanceCode,
-        registration_number: vehicleNumber,
-        vehicle_model: vehicleModel,
+        registration_number: vehicleNumber.trim(),
+        vehicle_model: vehicleModel || null,
         vehicle_type: vehicleType,
         status: 'pending_approval',
         created_by: req.user.id
@@ -89,11 +143,23 @@ class AmbulanceController {
           organizationName: org?.name
         });
       } catch (e) {
-        console.error('Failed to send new-ambulance notification:', e.message);
+        log.warn("notify superadmins new-ambulance failed", { msg: e.message });
       }
 
+      try {
+        await ActivityLogService.log({
+          activity: ACTIVITY_TYPES.AMBULANCE_CREATED,
+          comments: `Created ambulance ${amb.registration_number} (${amb.ambulance_code})`,
+          user: req.user,
+          organization: { id: organizationId },
+          metadata: { ambulanceId: String(amb._id), ambulanceCode, vehicleType, vehicleModel: vehicleModel || null },
+          req
+        });
+      } catch (e) { log.warn("activity log ambulance_created failed", { msg: e.message }); }
+
       return success(res, 'Ambulance created successfully. Awaiting approval.', {
-        ambulanceId: String(amb._id)
+        ambulanceId: String(amb._id),
+        ambulanceCode
       }, 201);
     } catch (err) {
       next(err);
@@ -213,23 +279,37 @@ class AmbulanceController {
         return next(new AppError('Only superadmin can set ambulance to inactive', 403));
       }
 
-      // Maintenance: unassign all staff + offboard active sessions
+      // Maintenance: unassign all staff + properly offboard active sessions
+      // (metadata snapshot, duration_minutes, patient cleanup, sockets — the
+      // full offboardSession path, not a raw updateMany).
       if (status === 'maintenance' && amb.status !== 'maintenance') {
         if (!['superadmin', 'hospital_admin', 'fleet_admin'].includes(req.user.role)) {
           return next(new AppError('Only admins can set ambulance to maintenance', 403));
         }
+        if (!(await userOwnsAmbulance(req, amb))) {
+          return next(new AppError('You can only manage ambulances from your organization', 403));
+        }
         const unassign = await AmbulanceAssignment.deleteMany({ ambulance_id: id });
-        const offboard = await PatientSession.updateMany(
-          { ambulance_id: id, status: { $in: ['active', 'onboarded', 'in_transit'] } },
-          { status: 'offboarded', offboarded_at: new Date() }
+        const offboardedCount = await offboardAllActiveSessionsForAmbulance(
+          id, req.user.id, 'Auto-offboarded: ambulance entered maintenance'
         );
         if (vehicleModel !== undefined) amb.vehicle_model = vehicleModel;
         if (vehicleType !== undefined) amb.vehicle_type = vehicleType;
         amb.status = status;
+        amb.current_hospital_id = null;
         await amb.save();
+        try {
+          await ActivityLogService.log({
+            activity: ACTIVITY_TYPES.AMBULANCE_UPDATED,
+            comments: `Ambulance ${amb.registration_number} set to maintenance (unassigned ${unassign.deletedCount || 0} staff, offboarded ${offboardedCount} sessions)`,
+            user: req.user,
+            metadata: { ambulanceId: id, newStatus: 'maintenance' },
+            req
+          });
+        } catch (e) { log.warn("activity log maintenance failed", { msg: e.message }); }
         return success(res, 'Ambulance set to maintenance. All staff unassigned and patients offboarded.', {
           unassignedUsers: unassign.deletedCount || 0,
-          offboardedSessions: offboard.modifiedCount || 0
+          offboardedSessions: offboardedCount
         });
       }
 
@@ -276,9 +356,7 @@ class AmbulanceController {
       if (status !== undefined) amb.status = status;
       await amb.save();
 
-      const payload = { success: true, message: 'Ambulance updated successfully' };
-      if (warning) payload.warning = warning;
-      return res.json(payload);
+      return success(res, 'Ambulance updated successfully', warning ? { warning } : null);
     } catch (err) {
       next(err);
     }
@@ -304,7 +382,7 @@ class AmbulanceController {
           ambulance_code: amb.ambulance_code
         });
       } catch (e) {
-        console.error('Failed to send ambulance approval notification:', e.message);
+        log.warn("notify admin ambulance approval failed", { msg: e.message });
       }
 
       return success(res, 'Ambulance approved successfully');
@@ -408,7 +486,7 @@ class AmbulanceController {
           ambulance_code: ambulance.ambulance_code
         });
       } catch (e) {
-        console.error('Failed to send ambulance assignment notification:', e.message);
+        log.warn("notify user ambulance assignment failed", { msg: e.message });
       }
 
       return success(res, 'User assigned to ambulance successfully');
@@ -547,10 +625,50 @@ class AmbulanceController {
     try {
       const { id } = req.params;
       if (!isValidId(id)) return next(new AppError('Invalid ambulance id', 400));
-      const amb = await Ambulance.findById(id);
+      const amb = await Ambulance.findById(id).populate('organization_id', 'type');
       if (!amb) return next(new AppError('Ambulance not found', 404));
+
+      // Ownership check — the route's authorize() lets any HOSPITAL_ADMIN or
+      // FLEET_ADMIN through, but we still need to ensure they own this
+      // specific vehicle. Without this, a hospital_admin could delete any
+      // fleet's ambulance.
+      if (!(await userOwnsAmbulance(req, amb))) {
+        return next(new AppError('You can only delete ambulances from your own organization', 403));
+      }
+
+      // Cascade: offboard active sessions through the proper helper (captures
+      // metadata + clears patient flags), drop assignments, and remove
+      // device rows so we don't leave dangling pointers.
+      const offboardedCount = await offboardAllActiveSessionsForAmbulance(
+        id, req.user.id, 'Auto-offboarded: ambulance deleted'
+      );
+      const unassigned = await AmbulanceAssignment.deleteMany({ ambulance_id: id });
+      const devicesRemoved = await AmbulanceDevice.deleteMany({ ambulance_id: id });
+
       await amb.deleteOne();
-      return success(res, 'Ambulance deleted successfully');
+
+      try {
+        await ActivityLogService.log({
+          activity: ACTIVITY_TYPES.AMBULANCE_DISABLED,
+          comments: `Deleted ambulance ${amb.registration_number} (offboarded ${offboardedCount} sessions, unassigned ${unassigned.deletedCount || 0} staff, removed ${devicesRemoved.deletedCount || 0} devices)`,
+          user: req.user,
+          metadata: {
+            ambulanceId: id,
+            registrationNumber: amb.registration_number,
+            offboardedSessions: offboardedCount,
+            unassignedUsers: unassigned.deletedCount || 0,
+            devicesRemoved: devicesRemoved.deletedCount || 0
+          },
+          req
+        });
+      } catch (e) { log.warn("activity log ambulance_delete failed", { msg: e.message }); }
+
+      return success(res, 'Ambulance deleted successfully', {
+        ambulanceId: id,
+        offboardedSessions: offboardedCount,
+        unassignedUsers: unassigned.deletedCount || 0,
+        devicesRemoved: devicesRemoved.deletedCount || 0
+      });
     } catch (err) {
       next(err);
     }
@@ -593,28 +711,28 @@ class AmbulanceController {
       if (amb.status === 'inactive') return next(new AppError('Ambulance is already inactive', 400));
 
       const unassigned = await AmbulanceAssignment.deleteMany({ ambulance_id: id });
-      const offboarded = await PatientSession.updateMany(
-        { ambulance_id: id, status: { $in: ['active', 'onboarded', 'in_transit'] } },
-        { status: 'offboarded', offboarded_at: new Date() }
+      const offboardedCount = await offboardAllActiveSessionsForAmbulance(
+        id, req.user.id, 'Auto-offboarded: ambulance deactivated'
       );
 
       amb.status = 'inactive';
+      amb.current_hospital_id = null;
       await amb.save();
 
       try {
         await ActivityLogService.log({
-          activity: 'AMBULANCE_DEACTIVATED',
-          comments: `Deactivated ambulance ${amb.registration_number}, unassigned ${unassigned.deletedCount} users, offboarded ${offboarded.modifiedCount} active sessions`,
+          activity: ACTIVITY_TYPES.AMBULANCE_DISABLED,
+          comments: `Deactivated ambulance ${amb.registration_number}, unassigned ${unassigned.deletedCount} users, offboarded ${offboardedCount} active sessions`,
           user: req.user,
-          metadata: { ambulanceId: id },
+          metadata: { ambulanceId: id, unassignedUsers: unassigned.deletedCount || 0, offboardedSessions: offboardedCount },
           req
         });
-      } catch (e) { console.error(e); }
+      } catch (e) { log.warn("activity log deactivate failed", { msg: e.message }); }
 
       return success(res, 'Ambulance deactivated successfully', {
         ambulanceId: id,
         unassignedUsers: unassigned.deletedCount || 0,
-        offboardedSessions: offboarded.modifiedCount || 0
+        offboardedSessions: offboardedCount
       });
     } catch (err) {
       next(err);
@@ -636,13 +754,13 @@ class AmbulanceController {
 
       try {
         await ActivityLogService.log({
-          activity: 'AMBULANCE_ACTIVATED',
+          activity: ACTIVITY_TYPES.AMBULANCE_ACTIVATED,
           comments: `Activated ambulance ${amb.registration_number}`,
           user: req.user,
           metadata: { ambulanceId: id },
           req
         });
-      } catch (e) { console.error(e); }
+      } catch (e) { log.warn("activity log activate failed", { msg: e.message }); }
 
       return success(res, 'Ambulance activated successfully', { ambulanceId: id });
     } catch (err) {

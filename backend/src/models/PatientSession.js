@@ -40,7 +40,12 @@ const PatientSessionSchema = new Schema(
     distance_km: { type: Number },
     duration_minutes: { type: Number },
 
-    // Mongo: rich JSON metadata can live directly on the doc
+    // Mongo: rich JSON metadata can live directly on the doc.
+    // NOTE: Schema.Types.Mixed does NOT auto-track changes. If you mutate
+    // session_metadata on a loaded document and `save()` it, the change
+    // won't persist unless you call `doc.markModified('session_metadata')`
+    // first. Prefer `findByIdAndUpdate(...)` for writes so this isn't a
+    // foot-gun.
     session_metadata: { type: Schema.Types.Mixed }
   },
   {

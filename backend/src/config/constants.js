@@ -95,17 +95,10 @@ module.exports = {
     CALL_REQUEST: 'call_request',
     CALL_ANSWER: 'call_answer',
     CALL_END: 'call_end',
-    // Deprecated 1:1 video call events (kept for backward compatibility)
-    VIDEO_REQUEST: 'video_request',
-    VIDEO_ANSWER: 'video_answer',
-    VIDEO_END: 'video_end',
-    // New multi-participant video room events
-    JOIN_VIDEO_ROOM: 'join_video_room',
-    LEAVE_VIDEO_ROOM: 'leave_video_room',
-    VIDEO_ROOM_JOINED: 'video_room_joined',
-    USER_JOINED_VIDEO: 'user_joined_video',
-    USER_LEFT_VIDEO: 'user_left_video',
-    WEBRTC_SIGNAL: 'webrtc_signal',
+    // Note: legacy 1:1 / multi-participant WebRTC signalling events and the
+    // mediasoup SFU events used to live here. They were removed when the
+    // backend stopped acting as a media server — video calls now go
+    // through Jitsi (web: VideoCallPanelJitsi, mobile: lib/videoCall.js).
     SESSION_DATA_ADDED: 'session_data_added',
     SESSION_DATA_DELETED: 'session_data_deleted'
   },

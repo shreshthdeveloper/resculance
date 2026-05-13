@@ -65,6 +65,16 @@ class SessionController {
         if (orgType === 'fleet_owner') {
           const fleetAmbIds = await Ambulance.find({ organization_id: orgIdToScope }).distinct('_id');
           filter.$or = [{ organization_id: orgIdToScope }, { ambulance_id: { $in: fleetAmbIds } }];
+        } else if (orgType === 'hospital') {
+          // Hospitals should see sessions both when they are the owner AND
+          // when they're only the destination_hospital (e.g. a partner fleet
+          // onboarded a patient bound for this hospital). The old code only
+          // matched on organization_id, which hid those sessions from the
+          // history list. Matches the patient-routes /sessions scoping.
+          filter.$or = [
+            { organization_id: orgIdToScope },
+            { destination_hospital_id: orgIdToScope }
+          ];
         } else {
           filter.organization_id = orgIdToScope;
         }
@@ -153,6 +163,11 @@ class SessionController {
       if (orgType === 'fleet_owner') {
         const ambIds = await Ambulance.find({ organization_id: orgIdToScope }).distinct('_id');
         filter.$or = [{ organization_id: orgIdToScope }, { ambulance_id: { $in: ambIds } }];
+      } else if (orgType === 'hospital') {
+        filter.$or = [
+          { organization_id: orgIdToScope },
+          { destination_hospital_id: orgIdToScope }
+        ];
       } else {
         filter.organization_id = orgIdToScope;
       }

@@ -80,7 +80,7 @@ export default function SettingsScreen() {
               })}
             </View>
             <Caption style={{ marginTop: t.spacing.s3 }}>
-              Auto follows your device's light/dark setting.
+              Auto follows your device&apos;s light/dark setting.
             </Caption>
           </Card>
         </View>

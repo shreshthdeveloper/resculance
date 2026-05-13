@@ -4,6 +4,8 @@ const { PatientSession, PatientSessionData, User } = require('../models');
 const { AppError } = require('../middleware/auth');
 const { success } = require('../utils/response');
 const { isValidId, equalIds } = require('../utils/ids');
+const storage = require('../services/storageService');
+const log = require('../utils/logger').child('sessionData');
 
 const VALID_TYPES = ['note', 'medication', 'file'];
 
@@ -39,7 +41,7 @@ class SessionDataController {
       const session = await PatientSession.findById(sessionId);
       if (!session) return next(new AppError('Session not found', 404));
 
-      const activeStatuses = ['onboarded', 'in_transit', 'active'];
+      const activeStatuses = ['onboarded', 'in_transit'];
       if (!activeStatuses.includes((session.status || '').toLowerCase())) {
         return next(new AppError('Can only add data to active sessions', 400));
       }
@@ -68,30 +70,41 @@ class SessionDataController {
     try {
       const { sessionId } = req.params;
       const file = req.file;
-      if (!file) return next(new AppError('No file uploaded', 400));
-      if (!isValidId(sessionId)) {
-        try { fs.unlinkSync(file.path); } catch {}
-        return next(new AppError('Invalid session id', 400));
-      }
+      // Multer is configured with memoryStorage, so `file.buffer` is set and
+      // there's never a temp path to clean up on the API server.
+      if (!file || !file.buffer) return next(new AppError('No file uploaded', 400));
+      if (!isValidId(sessionId)) return next(new AppError('Invalid session id', 400));
 
       const session = await PatientSession.findById(sessionId);
-      if (!session) {
-        try { fs.unlinkSync(file.path); } catch {}
-        return next(new AppError('Session not found', 404));
-      }
+      if (!session) return next(new AppError('Session not found', 404));
 
-      const activeStatuses = ['onboarded', 'in_transit', 'active'];
+      const activeStatuses = ['onboarded', 'in_transit'];
       if (!activeStatuses.includes((session.status || '').toLowerCase())) {
-        try { fs.unlinkSync(file.path); } catch {}
         return next(new AppError('Can only upload files to active sessions', 400));
       }
 
+      if (!storage.enabled()) {
+        log.error('upload blocked: MinIO disabled', null, { sessionId });
+        return next(new AppError('File storage is not configured. Please contact support.', 503));
+      }
+
+      const uploaded = await storage.uploadBuffer(
+        `sessions/${sessionId}`,
+        file.originalname,
+        file.buffer,
+        file.mimetype
+      );
+
+      // Store the opaque MinIO key alongside the friendly metadata. Old
+      // rows still in the DB have `filepath` pointing at the previous
+      // local-disk location — keep that path tolerated in the download
+      // handler so legacy files don't break.
       const fileContent = {
         filename: file.originalname,
-        filepath: file.path,
-        relativePath: `/uploads/session-files/${file.filename}`,
-        mimetype: file.mimetype,
-        size: file.size,
+        storageKey: uploaded.key,
+        storageBucket: uploaded.bucket,
+        mimetype: uploaded.mimetype,
+        size: uploaded.size,
         uploadedAt: new Date().toISOString()
       };
 
@@ -106,11 +119,12 @@ class SessionDataController {
       const io = req.app.get('io');
       if (io) io.to(`session_${sessionId}`).emit('session_data_added', { sessionId, data: sessionData });
 
+      log.info('session file uploaded', {
+        sessionId, dataId: String(created._id), key: uploaded.key, size: uploaded.size
+      });
       return success(res, 'File uploaded successfully', sessionData, 201);
     } catch (err) {
-      if (req.file && fs.existsSync(req.file.path)) {
-        try { fs.unlinkSync(req.file.path); } catch {}
-      }
+      log.error('uploadFile failed', err, { sessionId: req.params.sessionId });
       next(err);
     }
   }
@@ -213,11 +227,19 @@ class SessionDataController {
         return next(new AppError('You can only delete your own entries', 403));
       }
 
-      if (entry.data_type === 'file' && entry.content?.filepath) {
-        try {
-          if (fs.existsSync(entry.content.filepath)) fs.unlinkSync(entry.content.filepath);
-        } catch (e) {
-          console.error('Error deleting file:', e.message);
+      // Clean up the underlying blob if this is a file entry. New rows use
+      // a MinIO `storageKey`; pre-migration rows kept the bytes on local
+      // disk via `filepath`. Tolerate both so legacy data stays delete-able.
+      if (entry.data_type === 'file') {
+        const c = entry.content || {};
+        if (c.storageKey) {
+          await storage.deleteObject(c.storageKey).catch((e) => log.warn('legacy storage delete', { msg: e.message }));
+        } else if (c.filepath) {
+          try {
+            if (fs.existsSync(c.filepath)) fs.unlinkSync(c.filepath);
+          } catch (e) {
+            log.warn('legacy filesystem delete failed', { path: c.filepath, msg: e.message });
+          }
         }
       }
       await entry.deleteOne();
@@ -240,10 +262,36 @@ class SessionDataController {
       if (!entry) return next(new AppError('File not found', 404));
       if (entry.data_type !== 'file') return next(new AppError('This entry is not a file', 400));
 
-      const filepath = entry.content?.filepath;
-      if (!filepath || !fs.existsSync(filepath)) return next(new AppError('File not found on server', 404));
-      res.download(filepath, entry.content.filename);
+      const c = entry.content || {};
+
+      // Preferred path: object lives in MinIO. We issue a short-lived
+      // presigned URL and 302 the client to it — the bytes never re-stream
+      // through the API server, and the URL carries the original filename
+      // in Content-Disposition so the browser saves it correctly.
+      if (c.storageKey) {
+        try {
+          const url = await storage.presignedDownloadUrl(c.storageKey, {
+            downloadFilename: c.filename
+          });
+          if (!url) return next(new AppError('Storage not configured', 503));
+          // Cache headers off — the URL is single-use-ish and Auth-derived.
+          res.setHeader('Cache-Control', 'no-store');
+          return res.redirect(302, url);
+        } catch (err) {
+          log.error('failed to presign download', err, { dataId, key: c.storageKey });
+          return next(new AppError('Unable to generate download URL', 502));
+        }
+      }
+
+      // Legacy fallback: very early uploads landed on local disk. Stream
+      // them as-is so existing references don't 404.
+      if (c.filepath && fs.existsSync(c.filepath)) {
+        return res.download(c.filepath, c.filename);
+      }
+
+      return next(new AppError('File not found on server', 404));
     } catch (err) {
+      log.error('downloadFile failed', err, { dataId: req.params.dataId });
       next(err);
     }
   }

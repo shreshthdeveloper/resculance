@@ -4,15 +4,46 @@ const https = require('https');
 const { Ambulance, AmbulanceDevice } = require('../models');
 const { AppError } = require('../middleware/auth');
 const { success } = require('../utils/response');
-const { isValidId } = require('../utils/ids');
+const { isValidId, equalIds } = require('../utils/ids');
 
 // External device API (vehicleview.live) often uses self-signed certs
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+const DEVICE_TYPES = ['CAMERA', 'LIVE_LOCATION', 'ECG', 'VITAL_MONITOR', 'GPS_TRACKER'];
 
 function shapeDevice(doc) {
   if (!doc) return null;
   const d = doc.toObject ? doc.toObject() : doc;
   return { ...d, id: String(d._id || d.id), ambulance_id: String(d.ambulance_id) };
+}
+
+// Empty strings from form inputs should not overwrite stored credentials.
+// React forms commonly send `''` for unset optional fields; treat those as
+// "not provided" so a subsequent update doesn't clobber a real username /
+// password / api url with a blank.
+function cleanOptional(value) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  return value;
+}
+
+// Ensure the caller is allowed to mutate devices on this ambulance.
+// Superadmin: pass. Otherwise the caller's organization must either own the
+// ambulance, or (for hospital staff) currently be the locked hospital for an
+// active partnership-based run.
+async function userCanManageAmbulance(req, ambulance) {
+  if (!req?.user) return false;
+  if (req.user.role === 'superadmin') return true;
+  if (!ambulance) return false;
+
+  if (equalIds(ambulance.organization_id, req.user.organizationId)) return true;
+
+  if (req.user.organizationType === 'hospital'
+      && ambulance.current_hospital_id
+      && equalIds(ambulance.current_hospital_id, req.user.organizationId)) {
+    return true;
+  }
+  return false;
 }
 
 class AmbulanceDeviceController {
@@ -24,20 +55,34 @@ class AmbulanceDeviceController {
       if (!deviceName || !deviceType || !deviceId) {
         return next(new AppError('Device name, type, and ID are required', 400));
       }
+      if (!DEVICE_TYPES.includes(deviceType)) {
+        return next(new AppError(`Invalid device type. Must be one of: ${DEVICE_TYPES.join(', ')}`, 400));
+      }
       if (!isValidId(ambulanceId)) return next(new AppError('Invalid ambulance id', 400));
 
-      const ambulance = await Ambulance.findById(ambulanceId);
+      const ambulance = await Ambulance.findById(ambulanceId).lean();
       if (!ambulance) return next(new AppError('Ambulance not found', 404));
 
+      if (!(await userCanManageAmbulance(req, ambulance))) {
+        return next(new AppError('You do not have permission to manage devices on this ambulance', 403));
+      }
+
+      // Same ambulance + same device_id is an upsert by design: the device
+      // is a physical asset and the user is re-saving its config. We keep
+      // pre-existing credentials when the new payload leaves them blank so
+      // a typo on the "Device Username" field doesn't wipe stored secrets.
       const existing = await AmbulanceDevice.findOne({ ambulance_id: ambulanceId, device_id: deviceId });
       if (existing) {
         existing.device_name = deviceName;
         existing.device_type = deviceType;
-        existing.device_username = deviceUsername;
-        existing.device_password = devicePassword;
-        existing.device_api = deviceApi;
-        existing.manufacturer = manufacturer;
-        existing.model = model;
+        const newUsername = cleanOptional(deviceUsername);
+        const newPassword = cleanOptional(devicePassword);
+        const newApi = cleanOptional(deviceApi);
+        if (newUsername !== undefined) existing.device_username = newUsername;
+        if (newPassword !== undefined) existing.device_password = newPassword;
+        if (newApi !== undefined) existing.device_api = newApi;
+        if (manufacturer !== undefined) existing.manufacturer = cleanOptional(manufacturer) ?? null;
+        if (model !== undefined) existing.model = cleanOptional(model) ?? null;
         await existing.save();
         return success(res, 'Device already exists, updated successfully', shapeDevice(existing));
       }
@@ -47,11 +92,11 @@ class AmbulanceDeviceController {
         device_name: deviceName,
         device_type: deviceType,
         device_id: deviceId,
-        device_username: deviceUsername,
-        device_password: devicePassword,
-        device_api: deviceApi,
-        manufacturer,
-        model
+        device_username: cleanOptional(deviceUsername),
+        device_password: cleanOptional(devicePassword),
+        device_api: cleanOptional(deviceApi),
+        manufacturer: cleanOptional(manufacturer),
+        model: cleanOptional(model)
       });
 
       return success(res, 'Device added successfully', shapeDevice(created), 201);
@@ -93,20 +138,47 @@ class AmbulanceDeviceController {
       const device = await AmbulanceDevice.findById(id);
       if (!device) return next(new AppError('Device not found', 404));
 
-      const fieldMap = {
+      const ambulance = await Ambulance.findById(device.ambulance_id).lean();
+      if (!ambulance) return next(new AppError('Ambulance not found', 404));
+      if (!(await userCanManageAmbulance(req, ambulance))) {
+        return next(new AppError('You do not have permission to manage devices on this ambulance', 403));
+      }
+
+      // Required-string fields can be set with any non-empty value; optional
+      // fields go through cleanOptional so blanks don't wipe stored secrets.
+      const requiredMap = {
         deviceName: 'device_name',
         deviceType: 'device_type',
-        deviceId: 'device_id',
+        deviceId: 'device_id'
+      };
+      const optionalMap = {
         deviceUsername: 'device_username',
         devicePassword: 'device_password',
         deviceApi: 'device_api',
         manufacturer: 'manufacturer',
-        model: 'model',
-        status: 'status'
+        model: 'model'
       };
-      for (const [camel, snake] of Object.entries(fieldMap)) {
-        if (req.body[camel] !== undefined) device[snake] = req.body[camel];
-        else if (req.body[snake] !== undefined) device[snake] = req.body[snake];
+
+      for (const [camel, snake] of Object.entries(requiredMap)) {
+        const raw = req.body[camel] !== undefined ? req.body[camel] : req.body[snake];
+        if (raw !== undefined) {
+          if (typeof raw === 'string' && raw.trim() === '') {
+            return next(new AppError(`${snake.replace(/_/g, ' ')} cannot be empty`, 400));
+          }
+          device[snake] = raw;
+        }
+      }
+      for (const [camel, snake] of Object.entries(optionalMap)) {
+        const raw = req.body[camel] !== undefined ? req.body[camel] : req.body[snake];
+        if (raw !== undefined) {
+          const cleaned = cleanOptional(raw);
+          if (cleaned !== undefined) device[snake] = cleaned;
+        }
+      }
+      if (req.body.status !== undefined) device.status = req.body.status;
+
+      if (device.device_type && !DEVICE_TYPES.includes(device.device_type)) {
+        return next(new AppError(`Invalid device type. Must be one of: ${DEVICE_TYPES.join(', ')}`, 400));
       }
       await device.save();
 
@@ -122,6 +194,13 @@ class AmbulanceDeviceController {
       if (!isValidId(id)) return next(new AppError('Invalid device id', 400));
       const device = await AmbulanceDevice.findById(id);
       if (!device) return next(new AppError('Device not found', 404));
+
+      const ambulance = await Ambulance.findById(device.ambulance_id).lean();
+      if (!ambulance) return next(new AppError('Ambulance not found', 404));
+      if (!(await userCanManageAmbulance(req, ambulance))) {
+        return next(new AppError('You do not have permission to manage devices on this ambulance', 403));
+      }
+
       await device.deleteOne();
       return success(res, 'Device deleted successfully');
     } catch (err) {

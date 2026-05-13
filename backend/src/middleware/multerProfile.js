@@ -1,31 +1,25 @@
-const path = require('path');
-const fs = require('fs');
+/**
+ * Multer middleware for profile-image uploads.
+ *
+ * Switched from `diskStorage` to `memoryStorage` when we migrated profile
+ * pictures to MinIO. The controller picks the buffer up from `req.file.buffer`
+ * and hands it to `storageService.uploadBuffer('profiles', ...)`.
+ *
+ * Keep the same size/mime constraints — those are pure validation and
+ * happen before the buffer is allocated, so a hostile client can't push
+ * 100 MB into memory hoping to OOM the API server.
+ */
+
 const multer = require('multer');
 
-const uploadsDir = path.join(__dirname, '..', '..', 'uploads', 'profiles');
-try {
-  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-} catch (e) {
-  console.warn('Failed to ensure uploads/profiles directory:', e.message);
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const id = req.user?.id || 'anon';
-    cb(null, `${id}-${Date.now()}${ext}`);
-  }
-});
-
 const fileFilter = (_req, file, cb) => {
-  const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
   if (allowed.includes(file.mimetype)) return cb(null, true);
-  cb(new Error('Only JPG/PNG/WebP images are allowed'), false);
+  cb(new Error('Only JPG/PNG/WebP/HEIC images are allowed'), false);
 };
 
 module.exports = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
-  limits: { fileSize: 2 * 1024 * 1024 }
+  limits: { fileSize: 2 * 1024 * 1024 } // 2 MB cap — profile photos shouldn't be bigger than that
 });

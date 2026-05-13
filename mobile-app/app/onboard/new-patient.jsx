@@ -1,22 +1,35 @@
 // New-patient form — feeds straight into the onboarding confirm screen.
 
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   View,
 } from 'react-native';
 import { errorMessage } from '../../src/api/client';
 import { createPatient } from '../../src/api/patients';
 import { useTheme } from '../../src/theme';
-import { Button, Card, Input, Screen, SectionHeader } from '../../src/ui';
+import { Body, Button, Card, Caption, Input, Screen, SectionHeader } from '../../src/ui';
+
+// Backend schema enums — keep these aligned with backend/src/models/Patient.js.
+// Sending anything else trips the Mongoose validator and the user sees a
+// 500 instead of a helpful field error, so we restrict input to picker values.
+const GENDERS = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'other', label: 'Other' },
+];
+const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 export default function NewPatientScreen() {
   const t = useTheme();
   const router = useRouter();
+  // Forwarded from /onboard?ambulanceId=… so the confirm step pre-picks.
+  const { ambulanceId } = useLocalSearchParams();
   const [f, setF] = useState({
     firstName: '',
     lastName: '',
@@ -38,12 +51,21 @@ export default function NewPatientScreen() {
       Alert.alert('Required', 'First name is required.');
       return;
     }
+    if (f.age) {
+      const ageNum = Number(f.age);
+      if (Number.isNaN(ageNum) || ageNum < 0 || ageNum > 150) {
+        Alert.alert('Invalid age', 'Age must be a number between 0 and 150.');
+        return;
+      }
+    }
     const input = {
       firstName: f.firstName.trim(),
       lastName: f.lastName.trim() || undefined,
       age: f.age ? Number(f.age) : undefined,
-      gender: f.gender.trim() || undefined,
-      bloodGroup: f.bloodGroup.trim() || undefined,
+      // Gender + blood group are schema-enforced enums; only send a value
+      // when one was picked.
+      gender: f.gender || undefined,
+      bloodGroup: f.bloodGroup || undefined,
       phone: f.phone.trim() || undefined,
       emergencyContactName: f.emergencyContactName.trim() || undefined,
       emergencyContactPhone: f.emergencyContactPhone.trim() || undefined,
@@ -53,7 +75,10 @@ export default function NewPatientScreen() {
     setBusy(true);
     try {
       const r = await createPatient(input);
-      router.replace(`/onboard/${r.patientId}`);
+      router.replace({
+        pathname: `/onboard/${r.patientId}`,
+        params: ambulanceId ? { ambulanceId } : undefined,
+      });
     } catch (e) {
       Alert.alert('Save failed', errorMessage(e));
     } finally {
@@ -88,32 +113,35 @@ export default function NewPatientScreen() {
               onChangeText={(v) => set('lastName', v)}
               editable={!busy}
             />
-            <View style={{ flexDirection: 'row', gap: t.spacing.s3 }}>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Age"
-                  value={f.age}
-                  onChangeText={(v) => set('age', v)}
-                  keyboardType="number-pad"
-                  editable={!busy}
+            <Input
+              label="Age"
+              value={f.age}
+              onChangeText={(v) => set('age', v)}
+              keyboardType="number-pad"
+              editable={!busy}
+              placeholder="0–150"
+            />
+            <Caption style={{ marginBottom: t.spacing.s2 }}>Gender</Caption>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.s2, marginBottom: t.spacing.s4 }}>
+              {GENDERS.map((g) => (
+                <Pill
+                  key={g.value}
+                  label={g.label}
+                  active={f.gender === g.value}
+                  onPress={() => !busy && set('gender', f.gender === g.value ? '' : g.value)}
                 />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Gender"
-                  value={f.gender}
-                  onChangeText={(v) => set('gender', v)}
-                  editable={!busy}
+              ))}
+            </View>
+            <Caption style={{ marginBottom: t.spacing.s2 }}>Blood group</Caption>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.s2 }}>
+              {BLOOD_GROUPS.map((bg) => (
+                <Pill
+                  key={bg}
+                  label={bg}
+                  active={f.bloodGroup === bg}
+                  onPress={() => !busy && set('bloodGroup', f.bloodGroup === bg ? '' : bg)}
                 />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Blood"
-                  value={f.bloodGroup}
-                  onChangeText={(v) => set('bloodGroup', v)}
-                  editable={!busy}
-                />
-              </View>
+              ))}
             </View>
           </Card>
 
@@ -170,5 +198,31 @@ export default function NewPatientScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
+  );
+}
+
+// Local Pill matches the styling used on the ambulance form and elsewhere —
+// kept local so this screen doesn't pull in another shared dep just for it.
+function Pill({ label, active, onPress }) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        {
+          paddingHorizontal: t.spacing.s4,
+          paddingVertical: t.spacing.s2 + 2,
+          borderRadius: t.radius.pill,
+          backgroundColor: active ? t.colors.primary : t.colors.surfaceAlt,
+          borderWidth: 1,
+          borderColor: active ? t.colors.primary : t.colors.border,
+        },
+        pressed && { opacity: 0.75 },
+      ]}
+    >
+      <Body color={active ? '#fff' : t.colors.text} style={{ fontWeight: '600', fontSize: 13 }}>
+        {label}
+      </Body>
+    </Pressable>
   );
 }

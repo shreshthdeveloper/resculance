@@ -15,7 +15,11 @@ require('./models'); // ensure all schemas are registered
 const errorHandler = require('./middleware/errorHandler');
 const routes = require('./routes');
 const socketHandler = require('./socket/socketHandler');
-const mediasoupService = require('./services/mediasoupService');
+const storageService = require('./services/storageService');
+const logger = require('./utils/logger').child('server');
+// mediasoup was removed — video calls now go through Jitsi (see
+// frontend/src/components/VideoCallPanelJitsi.jsx and
+// mobile-app/src/lib/videoCall.js). The backend has no media-server role.
 
 const requiredEnvVars = ['JWT_SECRET', 'JWT_REFRESH_SECRET'];
 const missing = requiredEnvVars.filter((v) => !process.env[v]);
@@ -72,16 +76,14 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static uploads
+// Legacy uploads dir — only used for serving pre-MinIO files that may still
+// be referenced in old DB rows. We don't write here anymore (see
+// services/storageService.js + middleware/multer*.js, both backed by MinIO).
 const uploadsPath = path.join(__dirname, '..', 'uploads');
 try {
   if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
-  const profilesPath = path.join(uploadsPath, 'profiles');
-  if (!fs.existsSync(profilesPath)) fs.mkdirSync(profilesPath, { recursive: true });
-  const sessionFilesPath = path.join(uploadsPath, 'session-files');
-  if (!fs.existsSync(sessionFilesPath)) fs.mkdirSync(sessionFilesPath, { recursive: true });
 } catch (e) {
-  console.warn('Could not ensure uploads directory:', e.message);
+  logger.warn('could not ensure legacy uploads dir', { msg: e.message });
 }
 app.use('/uploads', express.static(uploadsPath));
 
@@ -113,29 +115,51 @@ const PORT = process.env.PORT || 5000;
   try {
     await db.connect();
   } catch (err) {
-    console.error('❌ MongoDB connection failed:', err.message);
+    logger.error('MongoDB connection failed — server exiting', err);
     process.exit(1);
   }
 
-  try {
-    await mediasoupService.initialize();
-    console.log('✅ Mediasoup service initialized');
-  } catch (e) {
-    console.error('⚠️  Mediasoup init failed:', e.message);
-    console.error('Video calls will not work until mediasoup is healthy.');
+  // Warm the MinIO connection at boot so misconfiguration shows up in logs
+  // immediately instead of on the first upload. Non-fatal — if MinIO is
+  // down the API still serves everything else and just returns 503 on
+  // upload routes.
+  if (storageService.enabled()) {
+    storageService.ensureBucket()
+      .then(() => logger.info('object storage ready', storageService.config()))
+      .catch((err) => logger.error('object storage init failed (uploads will 503 until resolved)', err));
+  } else {
+    logger.warn('object storage disabled — set MINIO_ENDPOINT/ACCESS_KEY/SECRET_KEY to enable file uploads');
   }
 
   server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔗 API Base URL: http://localhost:${PORT}/api/${API_VERSION}`);
+    logger.info('server listening', {
+      port: PORT,
+      env: process.env.NODE_ENV || 'development',
+      apiBase: `/api/${API_VERSION}`
+    });
   });
 })();
 
+// Top-level safety nets. Without these, an unhandled rejection in any
+// `.catch`-missing promise (e.g. a stray `await someThing()` without try)
+// vanishes silently in Node 16+ and only the operator running locally
+// sees the warning. Force them into the logger so prod alerting catches them.
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)), {
+    promise: String(promise)
+  });
+});
+process.on('uncaughtException', (err) => {
+  logger.error('uncaughtException — process will exit', err);
+  // Best practice: don't keep running in an unknown state. systemd / PM2 /
+  // Docker should restart us.
+  setTimeout(() => process.exit(1), 100).unref();
+});
+
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received: shutting down');
+  logger.info('SIGTERM received — shutting down');
   server.close(async () => {
-    try { await db.connection.close(false); } catch (e) { console.error(e); }
+    try { await db.connection.close(false); } catch (e) { logger.warn('db close failed', { msg: e.message }); }
     process.exit(0);
   });
 });

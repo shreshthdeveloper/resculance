@@ -4,12 +4,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, View } from 'react-native';
-import { getMyAmbulances, listAmbulancesForOrg } from '../../src/api/ambulances';
-import { errorMessage } from '../../src/api/client';
-import { listSessions } from '../../src/api/sessions';
-import { useAuth } from '../../src/store/auth';
-import { useTheme } from '../../src/theme';
+import { FlatList, RefreshControl, View } from 'react-native';
+import { getMyAmbulances, listAmbulancesForOrg } from '../src/api/ambulances';
+import { errorMessage } from '../src/api/client';
+import { listSessions } from '../src/api/sessions';
+import { useAuth } from '../src/store/auth';
+import { useTheme } from '../src/theme';
 import {
   Badge,
   Body,
@@ -22,9 +22,11 @@ import {
   OrgPicker,
   OrgPickerEmpty,
   Screen,
+  Skeleton,
+  SkeletonRow,
   Small,
   toneForStatus,
-} from '../../src/ui';
+} from '../src/ui';
 
 export default function MyAmbulanceScreen() {
   const t = useTheme();
@@ -105,8 +107,9 @@ export default function MyAmbulanceScreen() {
           gatedBySuperadminOrg ? (
             <OrgPickerEmpty resource="ambulances" />
           ) : loading ? (
-            <View style={{ alignItems: 'center', padding: t.spacing.s8 }}>
-              <ActivityIndicator color={t.colors.primary} />
+            <View style={{ gap: t.spacing.s4 }}>
+              <SkeletonAmbulanceCard />
+              <SkeletonRow />
             </View>
           ) : (
             <EmptyState
@@ -207,6 +210,34 @@ export default function MyAmbulanceScreen() {
         }}
       />
     </Screen>
+  );
+}
+
+function SkeletonAmbulanceCard() {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        padding: t.spacing.s5,
+        backgroundColor: t.colors.card,
+        borderRadius: t.radius.xl,
+        borderWidth: 1,
+        borderColor: t.colors.border,
+        gap: t.spacing.s4,
+      }}
+    >
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Skeleton width="50%" height={18} />
+          <Skeleton width="35%" height={12} />
+        </View>
+        <Skeleton width={80} height={22} radius={11} />
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.s4 }}>
+        <Skeleton width="45%" height={32} />
+        <Skeleton width="45%" height={32} />
+      </View>
+    </View>
   );
 }
 

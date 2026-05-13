@@ -7,6 +7,38 @@ const { AppError } = require('../middleware/auth');
 const { success } = require('../utils/response');
 const { isValidId } = require('../utils/ids');
 const { normalizeRole } = require('../utils/roleUtils');
+const storage = require('../services/storageService');
+const log = require('../utils/logger').child('auth');
+
+// Best-effort cleanup for a previously-stored avatar. New uploads live in
+// MinIO under `profiles/...`; pre-migration ones referenced /uploads/profiles/*
+// on the local disk. We tolerate both so old users can still get a fresh
+// avatar without their previous file being orphaned.
+async function dropOldAvatar(profileImageUrl) {
+  if (!profileImageUrl) return;
+  if (profileImageUrl.includes('/profiles/')) {
+    // Heuristic: extract whatever follows the bucket name as the object key.
+    // For legacy disk URLs (/uploads/profiles/<file>) we fall through to the
+    // fs unlink branch.
+    const cfg = storage.config();
+    const bucketTag = `/${cfg.bucket}/profiles/`;
+    const minioIdx = profileImageUrl.indexOf(bucketTag);
+    if (minioIdx >= 0) {
+      const key = profileImageUrl.slice(minioIdx + 1).split('?')[0];
+      await storage.deleteObject(key).catch((e) => log.warn('avatar minio delete failed', { msg: e.message }));
+      return;
+    }
+  }
+  if (profileImageUrl.includes('/uploads/profiles/')) {
+    try {
+      const oldFilename = profileImageUrl.split('/uploads/profiles/').pop();
+      const oldPath = path.join(__dirname, '..', '..', 'uploads', 'profiles', oldFilename);
+      if (oldFilename && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    } catch (e) {
+      log.warn('legacy avatar disk delete failed', { msg: e.message });
+    }
+  }
+}
 
 function signAccessToken(user) {
   return jwt.sign(
@@ -208,25 +240,35 @@ class AuthController {
 
   static async uploadProfileImage(req, res, next) {
     try {
-      if (!req.file) return next(new AppError('No file uploaded', 400));
-
-      const filename = req.file.filename;
-      const fileUrl = `${req.protocol}://${req.get('host')}/uploads/profiles/${filename}`;
-
-      const existing = await User.findById(req.user.id);
-      if (existing?.profile_image_url?.includes('/uploads/profiles/')) {
-        try {
-          const oldFilename = existing.profile_image_url.split('/uploads/profiles/').pop();
-          const oldPath = path.join(__dirname, '..', '..', 'uploads', 'profiles', oldFilename);
-          if (oldFilename && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        } catch (e) {
-          console.warn('Failed to remove old profile image:', e.message);
-        }
+      const file = req.file;
+      if (!file || !file.buffer) return next(new AppError('No file uploaded', 400));
+      if (!storage.enabled()) {
+        log.error('profile upload blocked: MinIO disabled', null, { userId: req.user.id });
+        return next(new AppError('Image storage is not configured. Please contact support.', 503));
       }
 
-      await User.findByIdAndUpdate(req.user.id, { profile_image_url: fileUrl });
-      return success(res, 'Profile image uploaded', { profileImageUrl: fileUrl });
+      const uploaded = await storage.uploadBuffer(
+        'profiles',
+        file.originalname,
+        file.buffer,
+        file.mimetype,
+        { prefix: String(req.user.id) }
+      );
+
+      const existing = await User.findById(req.user.id).select('profile_image_url').lean();
+      if (existing?.profile_image_url) {
+        // Don't await — best-effort cleanup, log failures but never block
+        // the upload response on them.
+        dropOldAvatar(existing.profile_image_url).catch((e) =>
+          log.warn('dropOldAvatar threw', { msg: e.message })
+        );
+      }
+
+      await User.findByIdAndUpdate(req.user.id, { profile_image_url: uploaded.publicUrl });
+      log.info('profile image updated', { userId: req.user.id, key: uploaded.key });
+      return success(res, 'Profile image uploaded', { profileImageUrl: uploaded.publicUrl });
     } catch (err) {
+      log.error('uploadProfileImage failed', err, { userId: req.user?.id });
       next(err);
     }
   }

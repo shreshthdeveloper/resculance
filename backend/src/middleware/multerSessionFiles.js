@@ -1,23 +1,17 @@
-const path = require('path');
-const fs = require('fs');
+/**
+ * Multer middleware for session-file uploads.
+ *
+ * Uses `memoryStorage` because the eventual destination is MinIO (see
+ * `services/storageService.js`). The controller pipes `req.file.buffer`
+ * into MinIO and stores only the returned object key on the
+ * PatientSessionData row — nothing is written to the API server's disk.
+ */
+
 const multer = require('multer');
-
-const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'session-files');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const sessionId = req.params.sessionId || 'unknown';
-    const ts = Date.now();
-    const safe = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    cb(null, `${sessionId}-${ts}-${safe}`);
-  }
-});
 
 const allowedTypes = [
   'application/pdf',
-  'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
+  'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
@@ -30,7 +24,7 @@ const fileFilter = (_req, file, cb) => {
 };
 
 module.exports = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB — same as previous disk-based config
 });

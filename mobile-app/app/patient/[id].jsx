@@ -1,11 +1,11 @@
 // Patient detail — full demographic + medical record + recent vital history.
 
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, View } from 'react-native';
 import { errorMessage } from '../../src/api/client';
-import { getPatient } from '../../src/api/patients';
+import { getPatient, listPatientSessions } from '../../src/api/patients';
 import { listVitalSigns } from '../../src/api/sessions';
 import { useTheme } from '../../src/theme';
 import {
@@ -25,22 +25,26 @@ import {
 
 export default function PatientDetailScreen() {
   const t = useTheme();
+  const router = useRouter();
   const { id } = useLocalSearchParams();
   const patientId = String(id);
   const [patient, setPatient] = useState(null);
   const [vitals, setVitals] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [p, vs] = await Promise.all([
+        const [p, vs, ss] = await Promise.all([
           getPatient(patientId),
           listVitalSigns(patientId, 5).catch(() => []),
+          listPatientSessions(patientId, { limit: 20 }).catch(() => []),
         ]);
         setPatient(p);
         setVitals(vs);
+        setSessions(ss);
       } catch (e) {
         setErr(errorMessage(e));
       } finally {
@@ -237,6 +241,69 @@ export default function PatientDetailScreen() {
                   {v.oxygen_saturation != null && <VitalCell label="SpO₂" value={`${v.oxygen_saturation}%`} />}
                 </View>
               </View>
+            ))
+          )}
+        </Card>
+
+        {/* Session history / reports. Tap a row → opens the session detail
+            where the full trip record (chat, vitals, files, notes) lives. */}
+        <Card padding="s5">
+          <SectionHeader
+            title={`Session history${sessions.length ? ` · ${sessions.length}` : ''}`}
+          />
+          {sessions.length === 0 ? (
+            <Caption>This patient has no previous sessions.</Caption>
+          ) : (
+            sessions.map((s, idx) => (
+              <Pressable
+                key={s.id ?? s._id ?? idx}
+                onPress={() => router.push(`/session/${s.id ?? s._id}`)}
+              >
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: t.spacing.s3,
+                        paddingVertical: t.spacing.s3,
+                        borderBottomWidth: idx < sessions.length - 1 ? 1 : 0,
+                        borderBottomColor: t.colors.border,
+                      },
+                      pressed && { opacity: 0.7 },
+                    ]}
+                  >
+                    <View
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 18,
+                        backgroundColor: t.colors.primaryTint,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons name="pulse" color={t.colors.primary} size={18} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <BodyStrong numberOfLines={1}>
+                        {s.session_code ?? s.sessionCode ?? 'Session'}
+                      </BodyStrong>
+                      <Caption numberOfLines={1}>
+                        {new Date(s.onboarded_at ?? s.onboardedAt ?? s.created_at).toLocaleString()}
+                        {s.destination_hospital_name
+                          ? ` · → ${s.destination_hospital_name}`
+                          : s.destination_location
+                          ? ` · → ${s.destination_location}`
+                          : ''}
+                        {s.duration_minutes != null ? ` · ${s.duration_minutes} min` : ''}
+                      </Caption>
+                    </View>
+                    <Badge label={(s.status ?? '—').replace('_', ' ')} tone={toneForStatus(s.status)} />
+                    <Ionicons name="chevron-forward" size={16} color={t.colors.textMuted} />
+                  </View>
+                )}
+              </Pressable>
             ))
           )}
         </Card>

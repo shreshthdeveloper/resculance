@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -14,7 +13,9 @@ import {
 } from 'react-native';
 import { getMyAmbulances } from '../../src/api/ambulances';
 import { errorMessage } from '../../src/api/client';
+import { listMyPartnerships } from '../../src/api/collaborations';
 import { getPatient, onboardPatient } from '../../src/api/patients';
+import { useAuth } from '../../src/store/auth';
 import { useTheme } from '../../src/theme';
 import {
   Badge,
@@ -27,18 +28,35 @@ import {
   Input,
   Screen,
   SectionHeader,
+  Skeleton,
+  SkeletonRow,
   Small,
   toneForStatus,
 } from '../../src/ui';
 
 export default function ConfirmOnboardScreen() {
   const t = useTheme();
-  const { patientId } = useLocalSearchParams();
+  const { patientId, ambulanceId: preselectedAmbulanceId } = useLocalSearchParams();
   const router = useRouter();
+  const user = useAuth((s) => s.user);
+  const activeOrg = useAuth((s) => s.activeOrg);
+
+  // Effective org context drives destination-hospital behaviour. A superadmin
+  // "viewing as" an org gets that org's type; everyone else uses their own.
+  const isSuperadmin = user?.role === 'superadmin';
+  const orgType = isSuperadmin ? activeOrg?.type : user?.organization?.type;
+  const orgId = isSuperadmin ? activeOrg?.id : user?.organization?.id;
+  const orgName = isSuperadmin ? activeOrg?.name : user?.organization?.name;
+  const isHospitalContext = orgType === 'hospital';
+  const isFleetContext = orgType === 'fleet_owner';
 
   const [patient, setPatient] = useState(null);
   const [ambulances, setAmbulances] = useState([]);
   const [selectedAmbId, setSelectedAmbId] = useState(null);
+  // Backend validation REQUIRES destinationHospitalId. Hospital users auto-
+  // select their own org; fleet users pick from approved partnerships.
+  const [partneredHospitals, setPartneredHospitals] = useState([]);
+  const [destinationHospitalId, setDestinationHospitalId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -50,16 +68,53 @@ export default function ConfirmOnboardScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const [p, ambs] = await Promise.all([
-          getPatient(String(patientId)),
-          getMyAmbulances(),
-        ]);
+        const tasks = [getPatient(String(patientId)), getMyAmbulances()];
+        // Only fleets need the partner list — hospitals self-destination.
+        if (isFleetContext && orgId) tasks.push(listMyPartnerships());
+        const [p, ambs, partnerships] = await Promise.all(tasks);
+
         setPatient(p);
         const usable = ambs.filter(
           (a) => a.status === 'available' || a.status === 'active',
         );
         setAmbulances(ambs);
-        setSelectedAmbId(usable[0]?.id ?? ambs[0]?.id ?? null);
+        // If we arrived with a pre-selected ambulanceId (from /onboardings),
+        // honour it when it appears in the user's accessible list; else
+        // fall back to the first usable / first available.
+        const preselected = preselectedAmbulanceId
+          ? ambs.find((a) => String(a.id) === String(preselectedAmbulanceId))
+          : null;
+        setSelectedAmbId(preselected?.id ?? usable[0]?.id ?? ambs[0]?.id ?? null);
+
+        // Wire up destination hospital. For hospital context this is
+        // deterministic (own org); for fleet context we surface a picker
+        // populated with partnered hospitals only.
+        if (isHospitalContext && orgId) {
+          setDestinationHospitalId(orgId);
+        } else if (isFleetContext && Array.isArray(partnerships)) {
+          // listMyPartnerships() server-side scopes to the JWT's org for
+          // fleet/hospital users, but for superadmin returns all. Filter
+          // client-side so superadmin viewing-as a fleet still works.
+          const hospitals = partnerships
+            .filter((pt) => {
+              const fleetId = pt.fleet_id?._id ?? pt.fleet_id;
+              return String(fleetId) === String(orgId);
+            })
+            .map((pt) => {
+              const h = pt.hospital_id;
+              const id = h?._id ?? h?.id ?? h;
+              return id
+                ? { id: String(id), name: h?.name ?? 'Hospital', code: h?.code ?? '' }
+                : null;
+            })
+            .filter(Boolean);
+          setPartneredHospitals(hospitals);
+          if (hospitals.length === 1) {
+            // Single partner → auto-pick. Matches the web's behaviour when
+            // there's only one viable destination.
+            setDestinationHospitalId(hospitals[0].id);
+          }
+        }
       } catch (e) {
         Alert.alert('Error', errorMessage(e), [
           { text: 'OK', onPress: () => router.back() },
@@ -68,7 +123,7 @@ export default function ConfirmOnboardScreen() {
         setLoading(false);
       }
     })();
-  }, [patientId, router]);
+  }, [patientId, router, preselectedAmbulanceId, isHospitalContext, isFleetContext, orgId]);
 
   const onConfirm = async () => {
     if (!selectedAmbId) {
@@ -78,10 +133,20 @@ export default function ConfirmOnboardScreen() {
       );
       return;
     }
+    if (!destinationHospitalId) {
+      Alert.alert(
+        'No destination',
+        isFleetContext
+          ? 'Pick a destination hospital from your active partnerships.'
+          : 'A destination hospital is required to onboard a patient.',
+      );
+      return;
+    }
     setBusy(true);
     try {
       const r = await onboardPatient(String(patientId), {
         ambulanceId: selectedAmbId,
+        destinationHospitalId,
         pickupLocation: pickup.trim() || 'Current Location',
         destinationLocation: destination.trim() || 'Hospital',
         chiefComplaint: complaint.trim() || undefined,
@@ -98,9 +163,24 @@ export default function ConfirmOnboardScreen() {
   if (loading) {
     return (
       <Screen edges={['bottom']}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={t.colors.primary} />
-        </View>
+        <ScrollView contentContainerStyle={{ padding: t.spacing.s5, gap: t.spacing.s4 }}>
+          <Card padding="s5">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s3 }}>
+              <Skeleton width={52} height={52} radius={26} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Skeleton width="55%" height={20} />
+                <Skeleton width="40%" height={12} />
+              </View>
+            </View>
+          </Card>
+          <SkeletonRow />
+          <SkeletonRow />
+          <Card padding="s5">
+            <Skeleton width="40%" height={14} style={{ marginBottom: 12 }} />
+            <Skeleton width="100%" height={44} style={{ marginBottom: 12 }} radius={12} />
+            <Skeleton width="100%" height={44} radius={12} />
+          </Card>
+        </ScrollView>
       </Screen>
     );
   }
@@ -238,6 +318,87 @@ export default function ConfirmOnboardScreen() {
             )}
           </View>
 
+          {/* Destination hospital — required by the backend. Hospital users
+              auto-target their own org; fleet users must pick from active
+              partnerships. Without this, /patients/:id/onboard returns 400. */}
+          <View>
+            <SectionHeader title="Destination hospital" />
+            {isHospitalContext ? (
+              <Card padding="s4">
+                <BodyStrong numberOfLines={1}>
+                  {orgName ?? 'Your hospital'}
+                </BodyStrong>
+                <Caption>Destination is automatically set to your hospital.</Caption>
+              </Card>
+            ) : isFleetContext ? (
+              partneredHospitals.length === 0 ? (
+                <Card padding="s4">
+                  <Body color={t.colors.warning}>
+                    No partnered hospitals available. Establish a partnership before onboarding.
+                  </Body>
+                </Card>
+              ) : (
+                <View style={{ gap: t.spacing.s2 }}>
+                  {partneredHospitals.map((h) => {
+                    const active = destinationHospitalId === h.id;
+                    return (
+                      <Pressable key={h.id} onPress={() => setDestinationHospitalId(h.id)}>
+                        {({ pressed }) => (
+                          <Card
+                            padding="s4"
+                            style={[
+                              active
+                                ? {
+                                    borderColor: t.colors.primary,
+                                    borderWidth: 2,
+                                    padding: t.spacing.s4 - 1,
+                                  }
+                                : null,
+                              pressed && { opacity: 0.85 },
+                            ]}
+                          >
+                            <View
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: t.spacing.s3,
+                              }}
+                            >
+                              <View
+                                style={{
+                                  width: 22,
+                                  height: 22,
+                                  borderRadius: 11,
+                                  borderWidth: 2,
+                                  borderColor: active ? t.colors.primary : t.colors.border,
+                                  backgroundColor: active ? t.colors.primary : 'transparent',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                {active && <Ionicons name="checkmark" size={14} color="#fff" />}
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <BodyStrong numberOfLines={1}>{h.name}</BodyStrong>
+                                {h.code ? <Caption numberOfLines={1}>{h.code}</Caption> : null}
+                              </View>
+                            </View>
+                          </Card>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )
+            ) : (
+              <Card padding="s4">
+                <Body color={t.colors.textSecondary}>
+                  Your account isn&apos;t linked to an organization. Sign in again or pick a viewing-as org.
+                </Body>
+              </Card>
+            )}
+          </View>
+
           {/* Trip details */}
           <Card padding="s5">
             <SectionHeader title="Trip details" />
@@ -273,7 +434,7 @@ export default function ConfirmOnboardScreen() {
             label="Onboard patient"
             onPress={onConfirm}
             loading={busy}
-            disabled={!selectedAmbId}
+            disabled={!selectedAmbId || !destinationHospitalId}
             fullWidth
             size="lg"
             icon={<Ionicons name="checkmark-circle" size={20} color="#fff" />}

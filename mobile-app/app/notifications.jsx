@@ -5,20 +5,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
   View,
 } from 'react-native';
-import { errorMessage } from '../../src/api/client';
+import { errorMessage } from '../src/api/client';
 import {
+  deleteAllNotifications,
   listNotifications,
   markAllRead,
   markRead,
-} from '../../src/api/notifications';
-import { getSocket } from '../../src/socket/client';
-import { useTheme } from '../../src/theme';
+} from '../src/api/notifications';
+import { getSocket } from '../src/socket/client';
+import { useTheme } from '../src/theme';
 import {
   Body,
   BodyStrong,
@@ -26,8 +27,9 @@ import {
   Caption,
   EmptyState,
   Screen,
+  SkeletonRow,
   Small,
-} from '../../src/ui';
+} from '../src/ui';
 
 export default function NotificationsScreen() {
   const t = useTheme();
@@ -116,17 +118,46 @@ export default function NotificationsScreen() {
             ? `${items.length} total`
             : ''}
         </Small>
-        {unread > 0 && (
-          <Pressable onPress={onMarkAll} hitSlop={8}>
-            <Small color={t.colors.primary} style={{ fontWeight: '600' }}>
-              Mark all read
-            </Small>
-          </Pressable>
-        )}
+        <View style={{ flexDirection: 'row', gap: t.spacing.s4 }}>
+          {unread > 0 && (
+            <Pressable onPress={onMarkAll} hitSlop={8}>
+              <Small color={t.colors.primary} style={{ fontWeight: '600' }}>
+                Mark all read
+              </Small>
+            </Pressable>
+          )}
+          {items.length > 0 && (
+            <Pressable
+              onPress={() =>
+                Alert.alert('Clear all', 'Delete every notification?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                      setItems([]);
+                      try {
+                        await deleteAllNotifications();
+                      } catch {}
+                    },
+                  },
+                ])
+              }
+              hitSlop={8}
+            >
+              <Small color={t.colors.error} style={{ fontWeight: '600' }}>
+                Clear
+              </Small>
+            </Pressable>
+          )}
+        </View>
       </View>
       {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={t.colors.primary} />
+        <View style={{ padding: t.spacing.s5, gap: t.spacing.s3 }}>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
         </View>
       ) : (
         <FlatList
