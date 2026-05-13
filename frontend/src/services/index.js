@@ -486,6 +486,14 @@ export const collaborationService = {
     const response = await api.patch(`/collaborations/${id}/cancel`);
     return response;
   },
+
+  // Returns active Partnership records for the caller's org (or all, for
+  // superadmin). Reads from the Partnership model — the authoritative source
+  // — rather than derived from approved CollaborationRequest rows.
+  getMyPartnerships: async () => {
+    const response = await api.get('/collaborations/partnerships/my');
+    return response;
+  },
   // No `delete` method — the backend doesn't expose `DELETE /collaborations/:id`.
   // Cancellation is done via the PATCH /:id/cancel route above, which marks
   // the request `cancelled` (preserving the audit trail). A prior version of

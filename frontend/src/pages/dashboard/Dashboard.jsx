@@ -365,15 +365,22 @@ export const Dashboard = () => {
                   (recentActivities.length > 0) ? (
                     recentActivities.map((act) => {
                       const Icon = getIconForActivity(act.activity);
+                      // ActivityController uses `.lean()` without a toJSON
+                      // transform, so the wire shape is `_id` (a hex string
+                      // after JSON encoding), not `id`. The old code keyed on
+                      // `act.id` which is now undefined → React falls back to
+                      // index-based reconciliation and warns. Prefer `_id`,
+                      // tolerate `id` for any code path that does shape it.
+                      const key = act._id || act.id;
                       return (
-                        <div key={act.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-background dark:hover:bg-gray-800/50 transition-colors cursor-pointer">
+                        <div key={key} className="flex items-start gap-3 p-3 rounded-lg hover:bg-background dark:hover:bg-gray-800/50 transition-colors cursor-pointer">
                           <div className={`w-10 h-10 rounded-lg bg-background-2 dark:bg-gray-800 flex items-center justify-center flex-shrink-0`}>
                             <Icon className={`w-5 h-5 ${getActivityColor(act.activity)}`} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-text">{act.activity || act.comments || 'Activity'}</p>
-                            <p className="text-xs text-text-secondary truncate">{act.comments || (act.metadata && JSON.stringify(act.metadata)) || act.organization_name || ''}</p>
-                            <p className="text-xs text-text-secondary mt-1">{timeAgo(act.created_at)}</p>
+                            <p className="text-xs text-text-secondary truncate">{act.comments || (act.metadata && JSON.stringify(act.metadata)) || act.organization_name || act.organizationName || ''}</p>
+                            <p className="text-xs text-text-secondary mt-1">{timeAgo(act.created_at || act.createdAt)}</p>
                           </div>
                         </div>
                       );

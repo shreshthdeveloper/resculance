@@ -208,10 +208,14 @@ export const Collaborations = () => {
     }
   }
 
-  // If superadmin has an organization attached, remove it from the selectable lists
+  // If superadmin has an organization attached, remove it from the selectable lists.
+  // Normalise via String() to match the equality pattern used elsewhere in this
+  // file (e.g. the exclude-already-collaborated logic below) — both sides are
+  // hex ObjectId strings emitted by the backend's shapeOrg helper, but String()
+  // is cheap insurance against future populated-ref leaks.
   if (user?.role === 'superadmin' && user?.organizationId) {
-    fleets = fleets.filter(o => o.id !== user.organizationId);
-    hosps = hosps.filter(o => o.id !== user.organizationId);
+    fleets = fleets.filter(o => String(o.id) !== String(user.organizationId));
+    hosps = hosps.filter(o => String(o.id) !== String(user.organizationId));
   }
 
   setCollaborations(Array.isArray(collabData) ? collabData : []);
@@ -465,21 +469,38 @@ export const Collaborations = () => {
       render: (collab) => {
           const status = (collab.status || '').toLowerCase();
           const isSuper = user?.role === 'superadmin';
-          
+
+          // All IDs that flow through here originate from the backend
+          // collaboration `shapeRequest` helper (which already maps populated
+          // refs to hex strings) and the auth payload (also a string). But
+          // unwrap-then-String() defensively so a populated `{ _id, ... }`
+          // ever leaking through can't silently break the action-button
+          // gating (which would hide the Accept/Cancel buttons from the
+          // recipient).
+          const norm = (ref) => {
+            if (!ref) return '';
+            if (typeof ref === 'string') return ref;
+            return String(ref._id || ref.id || ref);
+          };
+
           // Determine requester and recipient organizations
-          const requesterOrgId = collab.requester_organization_id || collab.requesterOrganizationId;
-          const isRequesterHospital = requesterOrgId === (collab.hospital_id || collab.hospitalId);
-          const recipientOrgId = isRequesterHospital ? (collab.fleet_id || collab.fleetId) : (collab.hospital_id || collab.hospitalId);
-          
+          const requesterOrgId = norm(collab.requester_organization_id || collab.requesterOrganizationId);
+          const collabHospitalId = norm(collab.hospital_id || collab.hospitalId);
+          const collabFleetId = norm(collab.fleet_id || collab.fleetId);
+          const myOrgId = norm(user?.organizationId);
+
+          const isRequesterHospital = requesterOrgId && requesterOrgId === collabHospitalId;
+          const recipientOrgId = isRequesterHospital ? collabFleetId : collabHospitalId;
+
           // Only the RECIPIENT can approve/reject (or superadmin)
-          const isRecipient = user?.organizationId === recipientOrgId;
+          const isRecipient = myOrgId && myOrgId === recipientOrgId;
           const canAcceptOrReject = status === 'pending' && (isSuper || isRecipient);
-          
+
           // Any party involved can cancel
-          const isRequesterOrg = user?.organizationId === requesterOrgId;
-          const isFleetOwner = user?.organizationId && (user.organizationId === (collab.fleet_id || collab.fleetId));
-          const isHospitalOwner = user?.organizationId && (user.organizationId === (collab.hospital_id || collab.hospitalId));
-          const canCancel = (status === 'pending' && (isSuper || isRequesterOrg || isFleetOwner || isHospitalOwner)) || 
+          const isRequesterOrg = myOrgId && myOrgId === requesterOrgId;
+          const isFleetOwner = myOrgId && myOrgId === collabFleetId;
+          const isHospitalOwner = myOrgId && myOrgId === collabHospitalId;
+          const canCancel = (status === 'pending' && (isSuper || isRequesterOrg || isFleetOwner || isHospitalOwner)) ||
                            (status === 'approved' && (isSuper || isRequesterOrg || isFleetOwner || isHospitalOwner));
 
           return (
@@ -515,7 +536,9 @@ export const Collaborations = () => {
     { id: 'rejected', label: 'Rejected' },
   ];
   
-  const currentActionCollab = actionModal.collabId ? collaborations.find(c => c.id === actionModal.collabId) : null;
+  const currentActionCollab = actionModal.collabId
+    ? collaborations.find(c => String(c.id) === String(actionModal.collabId))
+    : null;
   const actionTitle = actionModal.type === 'accept' ? 'Confirm Acceptance' :
                       actionModal.type === 'reject' ? 'Confirm Rejection' :
                       actionModal.type === 'cancel' ? 'Confirm Cancellation' : '';

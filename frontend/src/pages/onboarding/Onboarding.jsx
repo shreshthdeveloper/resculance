@@ -183,11 +183,19 @@ export const Onboarding = () => {
 
   const fetchHospitals = async () => {
     try {
-      const resp = await organizationService.getAll({ type: 'HOSPITAL' });
+      // NOTE: Org `type` is stored lowercase in the DB (Mongoose enum is
+      // ['hospital', 'fleet_owner', 'superadmin']). The previous code sent
+      // `type: 'HOSPITAL'` (a leftover from the MySQL backend, which compared
+      // strings case-insensitively). Mongo treats it as a literal mismatch
+      // and returns zero docs, which then makes `partneredHospitals` empty
+      // even when partnerships exist.
+      const resp = await organizationService.getAll({ type: 'hospital' });
       const raw = resp.data?.data?.organizations || resp.data?.organizations || resp.data || [];
       setHospitals(raw);
+      return raw;
     } catch (error) {
       console.error('Failed to fetch hospitals:', error);
+      return [];
     }
   };
 
@@ -196,47 +204,67 @@ export const Onboarding = () => {
       // For fleet owner, fetch their active partnerships and extract hospitals
       const userOrgId = user?.role === 'superadmin' ? selectedOrgId : user?.organizationId;
       if (!userOrgId) return;
-      
+
       console.log('🏥 Fetching partnered hospitals for fleet org:', userOrgId);
-      
-      // Ensure we have the hospitals list first
+
+      // Ensure we have the hospitals list (with city/state etc. for the
+      // dropdown label). `hospitals` state may not have populated yet on the
+      // first render, so re-fetch synchronously when empty.
       let hospitalsList = hospitals;
       if (!hospitalsList || hospitalsList.length === 0) {
-        await fetchHospitals();
-        // Wait a bit for state to update, or fetch directly
-        const resp = await organizationService.getAll({ type: 'HOSPITAL' });
-        const allOrgs = resp.data?.data?.organizations || resp.data?.organizations || resp.data || [];
-        hospitalsList = allOrgs.filter(org => {
-          const orgType = (org.type || '').toString().toLowerCase();
-          return orgType === 'hospital';
-        });
+        hospitalsList = await fetchHospitals();
       }
-      
+
       console.log('🏥 All hospitals available:', hospitalsList.map(h => `${h.id}:${h.name}`));
-      
-      const resp = await collaborationService.getAll({ status: 'approved' });
-      const collabData = resp.data?.data?.requests || resp.data?.requests || resp.data || [];
-      
-      console.log('🏥 All collaborations:', collabData);
-      
-      // Filter partnerships for this fleet and extract hospital IDs
-      const hospitalIds = collabData
-        .filter(c => {
-          const status = (c.status || c.request_status || '').toLowerCase();
-          const fleetId = c.fleet_id || c.fleetId;
-          const match = status === 'approved' && String(fleetId) === String(userOrgId);
-          console.log(`🔍 Checking collab: Fleet ${fleetId} vs ${userOrgId}, status: ${status}, match: ${match}`);
-          return match;
+
+      // Read partnerships from the Partnership model directly via the
+      // dedicated endpoint — this is the authoritative source. For non-
+      // superadmin fleet users the backend already scopes results to their
+      // org. Superadmin gets all partnerships, so we filter by the selected
+      // fleet org client-side.
+      let partnerships = [];
+      try {
+        const partResp = await collaborationService.getMyPartnerships();
+        partnerships = partResp.data?.data?.partnerships || partResp.data?.partnerships || [];
+      } catch (e) {
+        // Fall back to deriving from approved CollaborationRequests if the
+        // partnerships endpoint isn't reachable for some reason.
+        console.warn('🏥 partnerships/my endpoint failed, falling back to collaborations:', e?.message);
+        const resp = await collaborationService.getAll({ status: 'approved' });
+        const collabData = resp.data?.data?.requests || resp.data?.requests || resp.data || [];
+        partnerships = collabData
+          .filter(c => (c.status || c.request_status || '').toLowerCase() === 'approved')
+          .map(c => ({
+            fleet_id: c.fleet_id || c.fleetId,
+            hospital_id: c.hospital_id || c.hospitalId,
+            status: 'active'
+          }));
+      }
+
+      console.log('🏥 Partnerships fetched:', partnerships);
+
+      // Pull the hospital id out of a partnership row. The Partnership
+      // endpoint populates fleet_id/hospital_id as nested objects; the
+      // fallback path produces flat string ids. Handle both.
+      const extractId = (ref) => {
+        if (!ref) return null;
+        if (typeof ref === 'string') return ref;
+        return String(ref._id || ref.id || ref);
+      };
+
+      const hospitalIds = partnerships
+        .filter(p => {
+          const status = (p.status || '').toLowerCase();
+          if (status && status !== 'active' && status !== 'approved') return false;
+          const fleetId = extractId(p.fleet_id || p.fleetId);
+          return String(fleetId) === String(userOrgId);
         })
-        .map(c => c.hospital_id || c.hospitalId)
+        .map(p => extractId(p.hospital_id || p.hospitalId))
         .filter(Boolean);
-      
-      console.log('🏥 Found partnered hospital IDs (raw):', hospitalIds);
 
-      // Normalize IDs to strings for reliable comparison (works for ObjectIds)
+      console.log('🏥 Found partnered hospital IDs:', hospitalIds);
+
       const normalizedHospitalIds = hospitalIds.map(id => String(id));
-
-      // Filter hospitals to only show partnered ones (compare as strings)
       const partnered = (hospitalsList || []).filter(h => normalizedHospitalIds.includes(String(h.id)));
       console.log('🏥 Partnered hospitals:', partnered.map(h => h.name));
       setPartneredHospitals(partnered);
