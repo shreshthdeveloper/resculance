@@ -10,7 +10,7 @@ const mongoose = require('mongoose');
 mongoose.set('strictQuery', true);
 
 async function connect() {
-  const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/resulance';
+  const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/resculance';
   await mongoose.connect(uri, {
     serverSelectionTimeoutMS: parseInt(process.env.DB_CONNECT_TIMEOUT_MS, 10) || 10000,
     maxPoolSize: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 10

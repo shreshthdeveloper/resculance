@@ -44,6 +44,12 @@ export const Ambulances = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [devices, setDevices] = useState([]);
+  // Track dbIds the user explicitly removed from the form. We can't infer
+  // deletions by diffing the new device list against `devices` — if RHF
+  // ever drops the unregistered `dbId` from form state (e.g. after append),
+  // a diff would mark every existing device as "removed" and silently wipe
+  // them. Explicit tracking on row-remove is the only safe signal.
+  const [removedDeviceIds, setRemovedDeviceIds] = useState([]);
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [assignmentAmbulance, setAssignmentAmbulance] = useState(null);
   const [availableUsers, setAvailableUsers] = useState([]);
@@ -290,7 +296,8 @@ export const Ambulances = () => {
       reset({ ...defaultData, devices: [] });
       setDevices([]);
     }
-    
+    setRemovedDeviceIds([]);
+
     setIsModalOpen(true);
   };
 
@@ -298,6 +305,7 @@ export const Ambulances = () => {
     setIsModalOpen(false);
     setSelectedAmbulance(null);
     setDevices([]);
+    setRemovedDeviceIds([]);
     reset({ devices: [] });
     setSelectedAmbulanceActiveSession(null);
   };
@@ -368,24 +376,31 @@ export const Ambulances = () => {
       }
 
   // Handle devices
-      if (deviceData && deviceData.length > 0) {
-        // Only handle device deletion when editing an existing ambulance
-        if (selectedAmbulance && devices.length > 0) {
-          // Delete existing devices that are not in the new list
-          const existingDeviceIds = devices.map(d => d.id);
-          const newDeviceIds = deviceData.filter(d => d.dbId).map(d => d.dbId);
-          const devicesToDelete = existingDeviceIds.filter(id => !newDeviceIds.includes(id));
-          
-          for (const deviceId of devicesToDelete) {
-            try {
-              await ambulanceService.deleteDevice(deviceId);
-            } catch (error) {
-              console.error('Failed to delete device:', error);
-            }
+      // dbId is sourced from the hidden input registered in the field array.
+      // Treat empty strings as "no dbId" so an appended row that briefly
+      // touched the hidden input is still classified as a new device.
+      const hasDbId = (d) => typeof d?.dbId === 'string' && d.dbId.length > 0;
+
+      // Apply explicit removals first. Previously we inferred deletions by
+      // diffing the form against the original device list, which silently
+      // wiped every existing device whenever RHF dropped the unregistered
+      // `dbId` from form state (e.g. after the user appended a new row).
+      // Now we only delete dbIds the user explicitly removed via the row's
+      // ✕ button.
+      if (selectedAmbulance && removedDeviceIds.length > 0) {
+        for (const deviceId of removedDeviceIds) {
+          try {
+            await ambulanceService.deleteDevice(deviceId);
+          } catch (error) {
+            console.error('Failed to delete device:', error);
           }
         }
+      }
 
-        // Create or update devices
+      if (deviceData && deviceData.length > 0) {
+        // Create or update devices. The hidden `dbId` input keeps the
+        // database id reliably attached to each form row, so we can route
+        // every row to update vs. create without ambiguity.
         for (const device of deviceData) {
           try {
             // Clean up device data - only send fields we need
@@ -396,14 +411,17 @@ export const Ambulances = () => {
               deviceUsername: device.deviceUsername || '',
               devicePassword: device.devicePassword || ''
             };
-            
-            // Use dbId to check if this is an existing device from database
-            if (device.dbId) {
+
+            // Use dbId to check if this is an existing device from database.
+            // Duplicate device_id values are allowed — the routing decision
+            // here is purely "did the user start from a DB row (PUT) or add
+            // a brand new row (POST)", and the backend no longer treats
+            // same-device_id collisions specially.
+            if (hasDbId(device)) {
               // Update existing device
               console.log('Updating existing device:', device.dbId, cleanDevice);
               await ambulanceService.updateDevice(device.dbId, cleanDevice);
             } else {
-              // Create new device
               console.log('Creating new device for ambulance:', ambulanceId, cleanDevice);
               const result = await ambulanceService.createDevice(ambulanceId, cleanDevice);
               console.log('Device created successfully:', result);
@@ -487,7 +505,12 @@ export const Ambulances = () => {
   };
 
   const handleAddDevice = () => {
+    // dbId is intentionally an empty string so the hidden input has a
+    // defined value to register; an absent key would let RHF coerce it to
+    // undefined and we'd lose the row-shape symmetry with DB-loaded rows.
+    // hasDbId() in onSubmit treats empty strings as "new device".
     append({
+      dbId: '',
       deviceName: '',
       deviceType: '',
       deviceId: '',
@@ -1181,9 +1204,31 @@ export const Ambulances = () => {
             <div className="space-y-4">
               {fields.map((field, index) => (
                 <div key={field.id} className="border-2 border-border rounded-xl p-5 bg-slate-50 dark:bg-slate-900 relative hover:border-primary/30 transition-colors">
+                  {/*
+                    dbId distinguishes existing devices (PUT) from newly-added
+                    ones (POST) in onSubmit. It must be registered so RHF's
+                    useFieldArray keeps it in submitted data — otherwise every
+                    row looks "new", the delete-then-create branch wipes the
+                    previous devices, and auxiliary fields (device_api,
+                    manufacturer, model, jsession, status) are lost.
+                  */}
+                  <input type="hidden" {...register(`devices.${index}.dbId`)} />
                   <button
                     type="button"
-                    onClick={() => remove(index)}
+                    onClick={() => {
+                      // Capture the dbId (if this row was loaded from the
+                      // database) before removing the row from the field
+                      // array — once the row is gone the value is no longer
+                      // in form state and we'd have no way to issue the
+                      // backend delete on submit.
+                      const dbId = field?.dbId;
+                      if (typeof dbId === 'string' && dbId.length > 0) {
+                        setRemovedDeviceIds((prev) =>
+                          prev.includes(dbId) ? prev : [...prev, dbId]
+                        );
+                      }
+                      remove(index);
+                    }}
                     className="absolute top-3 right-3 p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                     title="Remove Device"
                   >

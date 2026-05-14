@@ -58,9 +58,18 @@ import {
   toneForStatus,
 } from '../src/ui';
 
-// Ambulance statuses that the web treats as "in progress" — for these we
-// hit /patients/sessions?ambulanceId=X to find the running session.
-const IN_PROGRESS_AMB_STATUSES = new Set(['active', 'onboarded', 'in_transit']);
+// Ambulance statuses that indicate the unit is currently carrying a
+// patient — for these we hit /patients/sessions?ambulanceId=X to find the
+// running session.
+//
+// In the live backend, `patientController.onboard` flips the ambulance to
+// `'active'` (patientController.js:673) and the offboard flow flips it back
+// to `'available'`. `'on_trip'` and `'en_route'` are also valid Mongo enum
+// states that admins or future hardware integrations might set, so include
+// them too. The legacy `'onboarded'` / `'in_transit'` values are session-
+// scoped (PatientSession enum), not ambulance-scoped — kept as defensive
+// fallbacks for any stale data.
+const IN_PROGRESS_AMB_STATUSES = new Set(['active', 'on_trip', 'en_route', 'onboarded', 'in_transit']);
 
 export default function OnboardingsScreen() {
   const t = useTheme();

@@ -374,7 +374,7 @@ function RequestRow({ r, myOrgId, isIncoming, onAccept, onReject, onCancel }) {
           <BodyStrong style={{ marginTop: 2 }}>{other.name ?? '—'}</BodyStrong>
           <Small numberOfLines={1}>{other.code ?? ''} · {other.type?.replace('_', ' ') ?? ''}</Small>
         </View>
-        <Badge label={r.status.replace('_', ' ')} tone={toneForStatus(r.status)} dot />
+        <Badge label={(r.status ?? 'unknown').replace('_', ' ')} tone={toneForStatus(r.status)} dot />
       </View>
 
       {r.message ? (

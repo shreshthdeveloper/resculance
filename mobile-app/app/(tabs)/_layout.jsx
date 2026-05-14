@@ -79,7 +79,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{ title: 'Home', headerTitle: 'Resulance' }}
+        options={{ title: 'Home', headerTitle: 'resculance' }}
       />
       <Tabs.Screen
         name="onboard"

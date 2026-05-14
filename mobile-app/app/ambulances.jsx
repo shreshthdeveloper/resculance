@@ -54,10 +54,15 @@ import {
   toneForStatus,
 } from '../src/ui';
 
+// Filter values must match the Ambulance Mongo enum exactly. The original
+// `in_transit` tab filtered for a value that doesn't exist in the schema
+// (the enum has `on_trip`/`en_route` instead) — the tab silently returned
+// an empty list. Use `on_trip` which is the canonical "currently carrying
+// a patient" state per backend/src/models/Ambulance.js.
 const STATUS_TABS = [
   { value: '', label: 'All' },
   { value: 'available', label: 'Available' },
-  { value: 'in_transit', label: 'In transit' },
+  { value: 'on_trip', label: 'On trip' },
   { value: 'maintenance', label: 'Maintenance' },
   { value: 'pending_approval', label: 'Pending' },
   { value: 'inactive', label: 'Inactive' },

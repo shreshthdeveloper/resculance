@@ -93,7 +93,7 @@ export default function SettingsScreen() {
               <KV k="Name" v={`${user.firstName} ${user.lastName}`} />
               <KV k="Email" v={user.email} />
               <KV k="Username" v={user.username} />
-              <KV k="Role" v={user.role.replace('_', ' ')} />
+              <KV k="Role" v={(user.role ?? 'user').replace('_', ' ')} />
               {user.organization ? (
                 <>
                   <KV k="Organization" v={user.organization.name} />
@@ -131,7 +131,7 @@ export default function SettingsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s3 }}>
               <Ionicons name="information-circle-outline" size={20} color={t.colors.textSecondary} />
               <View style={{ flex: 1 }}>
-                <BodyStrong>About Resulance</BodyStrong>
+                <BodyStrong>About resculance</BodyStrong>
                 <Caption>Version, links, credits</Caption>
               </View>
               <Ionicons name="chevron-forward" size={18} color={t.colors.textMuted} />

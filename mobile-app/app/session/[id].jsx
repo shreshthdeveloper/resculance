@@ -25,6 +25,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { errorMessage } from '../../src/api/client';
 import {
+  getAmbulanceDevicesLocation,
+  getDeviceData,
+  listAmbulanceDevices,
+} from '../../src/api/ambulances';
+import {
   addSessionData,
   addVitalSigns,
   buildSessionFileDownloadUrl,
@@ -36,7 +41,13 @@ import {
   uploadSessionFile,
 } from '../../src/api/sessions';
 import { openVideoCall } from '../../src/lib/videoCall';
-import { getSocket, joinSession, leaveSession } from '../../src/socket/client';
+import {
+  getSocket,
+  joinAmbulance,
+  joinSession,
+  leaveAmbulance,
+  leaveSession,
+} from '../../src/socket/client';
 import { useAuth } from '../../src/store/auth';
 import { useTheme } from '../../src/theme';
 import {
@@ -97,6 +108,28 @@ export default function SessionDetailScreen() {
     cabinCamera: false,
   });
   const listRef = useRef(null);
+
+  // --- Camera + live location (vehicleview.live proxy) ---------------------
+  // Mirrors the web's LiveCameraFeed + GPSLocationModal pattern. The backend
+  // (ambulanceDeviceController) does the 808GPS authentication server-side,
+  // so we just call the proxy endpoints and either embed coords inline (GPS)
+  // or open the player URL in the system browser (camera — no WebView).
+  const [cameraDevice, setCameraDevice] = useState(null);
+  const [cameraStreamUrl, setCameraStreamUrl] = useState('');
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+
+  const [gpsDevices, setGpsDevices] = useState([]); // [{ id, name, deviceIdno }]
+  const [deviceLocations, setDeviceLocations] = useState({}); // { [deviceId]: { lat, lng, ...} }
+  const [locationError, setLocationError] = useState(null);
+  const [locationRefreshing, setLocationRefreshing] = useState(false);
+
+  // Chat typing indicators — wired to `typing_start` / `typing_stop` on the
+  // backend socket handler (socketHandler.js:101-121). Matches the web's
+  // ChatPanel debounce behaviour (2-second linger).
+  const [typingUsers, setTypingUsers] = useState([]); // [{ userId, userName }]
+  const typingTimeoutRef = useRef(null);
+  const isTypingRef = useRef(false);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -195,6 +228,18 @@ export default function SessionDetailScreen() {
       }));
     };
 
+    // Typing indicators — bound here (rather than in the chat tab) because
+    // the listener is global per session. Self-events are filtered so the
+    // sender never sees themselves in the "X is typing" pill.
+    const onUserTyping = (payload = {}) => {
+      const { userId, userName, isTyping } = payload;
+      if (!userId || String(userId) === String(me?.id)) return;
+      setTypingUsers((prev) => {
+        const without = prev.filter((u) => String(u.userId) !== String(userId));
+        return isTyping ? [...without, { userId, userName: userName || 'Someone' }] : without;
+      });
+    };
+
     sock.on('new_message', onNewMessage);
     sock.on('message', onMessage);
     sock.on('vital_update', onVital);
@@ -202,6 +247,7 @@ export default function SessionDetailScreen() {
     sock.on('session_offboarded', onSessionEnded);
     sock.on('session_data_added', onDataAdded);
     sock.on('session_data_deleted', onDataDeleted);
+    sock.on('user_typing', onUserTyping);
 
     return () => {
       sock.off('new_message', onNewMessage);
@@ -211,14 +257,255 @@ export default function SessionDetailScreen() {
       sock.off('session_offboarded', onSessionEnded);
       sock.off('session_data_added', onDataAdded);
       sock.off('session_data_deleted', onDataDeleted);
+      sock.off('user_typing', onUserTyping);
       leaveSession(sessionId);
     };
-  }, [sessionId, router]);
+  }, [sessionId, router, me?.id]);
+
+  // --- Device discovery + initial camera / GPS load ------------------------
+  // Triggered once the session record loads (so we know which ambulance to
+  // query). Camera "stream URL" is built server-side and already contains a
+  // valid jsession token; we open it in the system browser via Linking.
+  useEffect(() => {
+    const ambulanceId = data?.session?.ambulance_id;
+    if (!ambulanceId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const list = await listAmbulanceDevices(ambulanceId);
+        if (cancelled) return;
+        const cam = (list || []).find(
+          (d) => d.device_type === 'CAMERA' && d.status === 'active',
+        );
+        const gps = (list || []).filter(
+          (d) =>
+            (d.device_type === 'GPS_TRACKER' || d.device_type === 'LIVE_LOCATION') &&
+            d.status === 'active',
+        );
+        setCameraDevice(cam || null);
+        setGpsDevices(
+          gps.map((d) => ({
+            id: String(d.id ?? d._id),
+            name: d.device_name || 'GPS tracker',
+            deviceIdno: d.device_id,
+          })),
+        );
+        if (gps.length > 0) {
+          // Fire initial location fetch immediately so the panel doesn't
+          // show an empty card while the auto-refresh interval ticks.
+          refreshLocations(ambulanceId, /* silent */ false).catch(() => {});
+        }
+      } catch (e) {
+        if (!cancelled) console.warn('Failed to load ambulance devices', e?.message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.session?.ambulance_id]);
+
+  // Auto-refresh live location every 15s. Same cadence as the web modal
+  // (which polls at 10s) — slightly slower here to be friendlier to mobile
+  // battery + cellular data. Live `location_update` socket events still
+  // patch the state instantly between polls.
+  useEffect(() => {
+    const ambulanceId = data?.session?.ambulance_id;
+    if (!ambulanceId || gpsDevices.length === 0) return;
+    const tick = () => refreshLocations(ambulanceId, /* silent */ true).catch(() => {});
+    const interval = setInterval(tick, 15000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.session?.ambulance_id, gpsDevices.length]);
+
+  // Subscribe to the ambulance socket room for instant `location_update`
+  // pushes (socketHandler.js:74-83). Bound separately from the session
+  // effect because it depends on a different id and shouldn't piggyback on
+  // session-room cleanup.
+  useEffect(() => {
+    const ambulanceId = data?.session?.ambulance_id;
+    if (!ambulanceId) return;
+    joinAmbulance(ambulanceId);
+    const sock = getSocket();
+    if (!sock) return () => leaveAmbulance(ambulanceId);
+
+    const onLocation = (payload = {}) => {
+      const { latitude, longitude } = payload;
+      if (typeof latitude !== 'number' || typeof longitude !== 'number') return;
+      // The socket payload doesn't carry device id; patch every known GPS
+      // device with the same coords (in practice an ambulance usually only
+      // has one GPS unit). The 15s poll will reconcile per-device values.
+      setDeviceLocations((prev) => {
+        const next = { ...prev };
+        for (const d of gpsDevices) {
+          next[d.id] = {
+            ...(next[d.id] || {}),
+            lat: latitude,
+            lng: longitude,
+            lastUpdate: new Date().toISOString(),
+            source: 'socket',
+          };
+        }
+        return next;
+      });
+    };
+
+    sock.on('location_update', onLocation);
+    return () => {
+      sock.off('location_update', onLocation);
+      leaveAmbulance(ambulanceId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.session?.ambulance_id, gpsDevices]);
+
+  // Parse one 808GPS payload entry into our normalized location shape.
+  // Mirrors the parsing in the web's GPSLocationModal so the field names
+  // here track the same upstream API contract.
+  function parse808Location(rawPayload) {
+    const status = rawPayload?.status;
+    if (!Array.isArray(status) || status.length === 0) return null;
+    const d = status[0];
+    let lat;
+    let lng;
+    if (d.mlat && d.mlng) {
+      lat = parseFloat(d.mlat);
+      lng = parseFloat(d.mlng);
+    } else if (d.lat && d.lng) {
+      // 808GPS stores raw GPS as integer microdegrees on this path.
+      lat = parseFloat(d.lat) / 1e6;
+      lng = parseFloat(d.lng) / 1e6;
+    }
+    if (!lat || !lng || Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    return {
+      lat,
+      lng,
+      speed: d.sp ? parseFloat(d.sp) / 10 : 0, // 808GPS reports speed * 10
+      online: d.ol === 1,
+      lastUpdate: d.gt || new Date().toISOString(),
+      address: d.ps || '',
+      signal: d.net ?? 0,
+      battery: d.ac ?? 0,
+    };
+  }
+
+  async function refreshLocations(ambulanceId, silent) {
+    if (!silent) setLocationRefreshing(true);
+    try {
+      const results = await getAmbulanceDevicesLocation(ambulanceId);
+      // Backend returns either an array (success) or `{ ... }` wrapper.
+      const list = Array.isArray(results) ? results : results?.results || [];
+      setDeviceLocations((prev) => {
+        const next = { ...prev };
+        for (const r of list) {
+          const parsed = parse808Location(r?.location);
+          if (parsed) next[r.deviceId] = parsed;
+        }
+        return next;
+      });
+      setLocationError(null);
+    } catch (e) {
+      setLocationError(errorMessage(e));
+    } finally {
+      if (!silent) setLocationRefreshing(false);
+    }
+  }
+
+  async function loadCameraStream() {
+    if (!cameraDevice?.id) return;
+    setCameraLoading(true);
+    setCameraError(null);
+    try {
+      // `getDeviceData` for a CAMERA hits 808GPS server-side, authenticates,
+      // and returns a player URL that already contains the jsession token.
+      // Same behaviour as the web's `cameraService.getCameraStreamUrl`,
+      // minus the client-side fetch dance.
+      const r = await getDeviceData(cameraDevice.id);
+      const url = r?.payload?.streamUrl;
+      if (!url) throw new Error('No stream URL returned');
+      setCameraStreamUrl(url);
+    } catch (e) {
+      setCameraError(errorMessage(e));
+    } finally {
+      setCameraLoading(false);
+    }
+  }
+
+  // Auto-load the stream URL once we know which camera device to query.
+  useEffect(() => {
+    if (cameraDevice?.id) loadCameraStream();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraDevice?.id]);
+
+  function openCameraInBrowser() {
+    if (!cameraStreamUrl) return;
+    Linking.openURL(cameraStreamUrl).catch(() =>
+      Alert.alert('Could not open camera', 'No browser was available to open the player URL.'),
+    );
+  }
+
+  function openLocationInMaps(loc) {
+    if (!loc?.lat || !loc?.lng) return;
+    // Google Maps universal link — on iOS opens Apple Maps if Google Maps
+    // isn't installed; on Android opens whichever map app is configured.
+    Linking.openURL(`https://www.google.com/maps?q=${loc.lat},${loc.lng}`).catch(() =>
+      Alert.alert('Could not open Maps', 'No map app was available.'),
+    );
+  }
+
+  // Typing-indicator helpers — mirror the web ChatPanel's 2-second debounce.
+  // We track "currently emitting typing" in a ref so we don't spam socket
+  // events on every keystroke; we only emit on the rising edge and after
+  // the silence timer fires.
+  function emitTyping(isTyping) {
+    const sock = getSocket();
+    if (!sock) return;
+    if (isTyping) {
+      if (!isTypingRef.current) {
+        sock.emit('typing_start', { sessionId });
+        isTypingRef.current = true;
+      }
+    } else if (isTypingRef.current) {
+      sock.emit('typing_stop', { sessionId });
+      isTypingRef.current = false;
+    }
+  }
+
+  function onDraftChange(value) {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (value.trim()) {
+      emitTyping(true);
+      typingTimeoutRef.current = setTimeout(() => emitTyping(false), 2000);
+    } else {
+      emitTyping(false);
+    }
+  }
+
+  // Clear any pending typing-stop timer + emit a final stop when leaving
+  // the screen so other clients don't see a stuck "is typing…" pill.
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      emitTyping(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onSend = async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setDraft('');
+    // Send-time stop fires before the network call so other clients don't
+    // still see "typing…" while the bubble is already rendering for them.
+    emitTyping(false);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
     setSending(true);
     try {
       const sent = await sendMessage(sessionId, { message: text });
@@ -495,7 +782,7 @@ export default function SessionDetailScreen() {
               {session.patient_first_name} {session.patient_last_name}
             </H2>
           </View>
-          <Badge label={session.status.replace('_', ' ')} tone={toneForStatus(session.status)} dot />
+          <Badge label={(session.status ?? 'unknown').replace('_', ' ')} tone={toneForStatus(session.status)} dot />
         </View>
       </View>
 
@@ -514,38 +801,255 @@ export default function SessionDetailScreen() {
         >
           <VitalsDashboard latest={vitals[0] ?? null} onAdd={isActive ? () => setShowVitalsModal(true) : null} />
 
-          {/* Camera + Video panels — mirrors the web Ambulance Console
-              cards. Mobile can't embed the live device camera stream
-              without a WebView (and the device URL is org-private anyway),
-              so we link out to a browser the same way the web's "open in
-              new tab" affordance does. */}
+          {/* Live camera feed — same backend protocol as the web's
+              LiveCameraFeed: backend authenticates with 808GPS and hands
+              us a player URL that already contains a valid jsession token.
+              On mobile we can't embed the iframe player without bundling
+              react-native-webview, so the affordance is "open in browser" —
+              same content, just a system-browser tab instead of an inline
+              video. The state visuals (loading / unavailable / live) and
+              the "open" button match the web's modal exactly. */}
           <Card padding="s4">
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s2, marginBottom: t.spacing.s3 }}>
-              <Ionicons name="videocam-outline" size={20} color={t.colors.primary} />
+              <Ionicons name="videocam-outline" size={18} color={t.colors.primary} />
               <BodyStrong>Live camera feed</BodyStrong>
+              {cameraStreamUrl ? (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    marginLeft: 'auto',
+                    backgroundColor: t.colors.errorTint,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: t.radius.pill,
+                  }}
+                >
+                  <View
+                    style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.colors.error }}
+                  />
+                  <Caption color={t.colors.error} style={{ fontWeight: '700' }}>LIVE</Caption>
+                </View>
+              ) : null}
             </View>
-            <View
-              style={{
-                aspectRatio: 16 / 9,
-                backgroundColor: '#000',
-                borderRadius: t.radius.lg,
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                marginBottom: t.spacing.s3,
-              }}
-            >
-              <Ionicons name="alert-circle" color="#fff" size={32} />
-              <Small color="rgba(255,255,255,0.85)">Camera not embedded on mobile</Small>
-              <Small color="rgba(255,255,255,0.6)" style={{ textAlign: 'center', paddingHorizontal: 16 }}>
-                Use a dev build with react-native-webview to stream inline,
-                or open the device URL in your browser.
-              </Small>
+
+            {!cameraDevice && !cameraLoading ? (
+              <View
+                style={{
+                  aspectRatio: 16 / 9,
+                  backgroundColor: t.colors.surfaceAlt,
+                  borderRadius: t.radius.lg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  marginBottom: t.spacing.s3,
+                }}
+              >
+                <Ionicons name="videocam-off" color={t.colors.textMuted} size={28} />
+                <Small color={t.colors.textSecondary}>No active camera on this ambulance</Small>
+              </View>
+            ) : cameraLoading ? (
+              <View
+                style={{
+                  aspectRatio: 16 / 9,
+                  backgroundColor: '#000',
+                  borderRadius: t.radius.lg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  marginBottom: t.spacing.s3,
+                }}
+              >
+                <ActivityIndicator color={t.colors.primary} />
+                <Small color="rgba(255,255,255,0.85)">Authenticating with vehicleview.live…</Small>
+              </View>
+            ) : cameraError ? (
+              <View
+                style={{
+                  aspectRatio: 16 / 9,
+                  backgroundColor: '#000',
+                  borderRadius: t.radius.lg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: t.spacing.s4,
+                  marginBottom: t.spacing.s3,
+                }}
+              >
+                <Ionicons name="alert-circle" color={t.colors.error} size={28} />
+                <Small color="rgba(255,255,255,0.85)" style={{ textAlign: 'center' }}>
+                  {cameraError}
+                </Small>
+                <Button label="Retry" size="sm" variant="outline" onPress={loadCameraStream} />
+              </View>
+            ) : (
+              <Pressable onPress={openCameraInBrowser}>
+                {({ pressed }) => (
+                  <View
+                    style={{
+                      aspectRatio: 16 / 9,
+                      backgroundColor: '#000',
+                      borderRadius: t.radius.lg,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      marginBottom: t.spacing.s3,
+                      opacity: pressed ? 0.85 : 1,
+                    }}
+                  >
+                    <Ionicons name="play-circle" color="#fff" size={48} />
+                    <BodyStrong color="#fff">Tap to watch live</BodyStrong>
+                    <Small color="rgba(255,255,255,0.7)">
+                      {cameraDevice?.device_name || 'Vehicle camera'}
+                    </Small>
+                  </View>
+                )}
+              </Pressable>
+            )}
+
+            {cameraStreamUrl ? (
+              <Button
+                label="Open in browser"
+                variant="outline"
+                size="sm"
+                icon={<Ionicons name="open-outline" size={16} color={t.colors.primary} />}
+                onPress={openCameraInBrowser}
+                fullWidth
+              />
+            ) : null}
+          </Card>
+
+          {/* Live location — coords + speed + signal + address, refreshed
+              every 15s. Same upstream API as the web's GPSLocationModal
+              (808GPS getDeviceStatus). "Open in Maps" uses a Google Maps
+              universal link, which on iOS falls back to Apple Maps if
+              Google Maps isn't installed. */}
+          <Card padding="s4">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s2, marginBottom: t.spacing.s3 }}>
+              <Ionicons name="location-outline" size={18} color={t.colors.primary} />
+              <BodyStrong>Live location</BodyStrong>
+              <View style={{ flex: 1 }} />
+              {gpsDevices.length > 0 ? (
+                <Pressable
+                  onPress={() => {
+                    const ambulanceId = data?.session?.ambulance_id;
+                    if (ambulanceId) refreshLocations(ambulanceId, false);
+                  }}
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="refresh"
+                    size={18}
+                    color={locationRefreshing ? t.colors.textMuted : t.colors.primary}
+                  />
+                </Pressable>
+              ) : null}
             </View>
-            <Small color={t.colors.textSecondary}>
-              The vehicle&apos;s onboard cameras stream through vehicleview.live and are
-              viewable on the web Ambulance Console.
-            </Small>
+
+            {gpsDevices.length === 0 ? (
+              <View
+                style={{
+                  paddingVertical: t.spacing.s5,
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <Ionicons name="navigate-circle-outline" color={t.colors.textMuted} size={28} />
+                <Small color={t.colors.textSecondary}>No GPS tracker configured</Small>
+              </View>
+            ) : (
+              <View style={{ gap: t.spacing.s3 }}>
+                {gpsDevices.map((dev) => {
+                  const loc = deviceLocations[dev.id];
+                  return (
+                    <View
+                      key={dev.id}
+                      style={{
+                        padding: t.spacing.s3,
+                        borderRadius: t.radius.lg,
+                        backgroundColor: t.colors.surfaceAlt,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          marginBottom: 6,
+                        }}
+                      >
+                        <BodyStrong>{dev.name}</BodyStrong>
+                        {loc ? (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: 3,
+                                backgroundColor: loc.online ? t.colors.success : t.colors.textMuted,
+                              }}
+                            />
+                            <Caption color={loc.online ? t.colors.success : t.colors.textSecondary}>
+                              {loc.online ? 'Online' : 'Offline'}
+                            </Caption>
+                          </View>
+                        ) : (
+                          <Caption color={t.colors.textMuted}>Loading…</Caption>
+                        )}
+                      </View>
+
+                      {loc ? (
+                        <>
+                          {loc.address ? (
+                            <Small color={t.colors.text} style={{ marginBottom: 6 }} numberOfLines={2}>
+                              {loc.address}
+                            </Small>
+                          ) : null}
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              gap: t.spacing.s3,
+                              marginBottom: t.spacing.s3,
+                            }}
+                          >
+                            <Stat label="Speed" value={`${(loc.speed ?? 0).toFixed(1)} km/h`} />
+                            <Stat label="Signal" value={`${loc.signal || 0}G`} />
+                            <Stat label="Battery" value={`${loc.battery || 0}%`} />
+                          </View>
+                          <Caption color={t.colors.textMuted} style={{ marginBottom: t.spacing.s2 }}>
+                            {loc.lat.toFixed(5)}, {loc.lng.toFixed(5)}
+                            {loc.lastUpdate
+                              ? ` · ${new Date(loc.lastUpdate).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}`
+                              : ''}
+                          </Caption>
+                          <Button
+                            label="Open in Maps"
+                            variant="outline"
+                            size="sm"
+                            icon={<Ionicons name="navigate" size={16} color={t.colors.primary} />}
+                            onPress={() => openLocationInMaps(loc)}
+                            fullWidth
+                          />
+                        </>
+                      ) : null}
+                    </View>
+                  );
+                })}
+                {locationError ? (
+                  <Caption color={t.colors.error}>{locationError}</Caption>
+                ) : null}
+              </View>
+            )}
           </Card>
 
           <Card padding="s4">
@@ -739,6 +1243,34 @@ export default function SessionDetailScreen() {
               </View>
             }
           />
+          {/* Typing indicator — driven by `user_typing` socket events. Shown
+              above the input so it reads as a status line for what's about
+              to arrive. Matches the web ChatPanel's positioning. */}
+          {typingUsers.length > 0 ? (
+            <View
+              style={{
+                paddingHorizontal: t.spacing.s4,
+                paddingTop: 6,
+                paddingBottom: 4,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <View
+                style={{
+                  width: 4,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: t.colors.primary,
+                }}
+              />
+              <Caption color={t.colors.textSecondary}>
+                {typingUsers.map((u) => u.userName).join(', ')}{' '}
+                {typingUsers.length === 1 ? 'is' : 'are'} typing…
+              </Caption>
+            </View>
+          ) : null}
           <View
             style={{
               flexDirection: 'row',
@@ -752,7 +1284,11 @@ export default function SessionDetailScreen() {
           >
             <TextInput
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={(v) => {
+                setDraft(v);
+                onDraftChange(v);
+              }}
+              onBlur={() => emitTyping(false)}
               placeholder={isActive ? 'Message the crew…' : 'Session is closed'}
               placeholderTextColor={t.colors.textMuted}
               multiline
@@ -1023,7 +1559,7 @@ function ChatBubble({ msg, mine }) {
     >
       {!mine && (
         <Caption color={t.colors.primary} style={{ marginBottom: 2 }}>
-          {msg.sender_first_name} {msg.sender_last_name} · {msg.sender_role.replace('_', ' ')}
+          {msg.sender_first_name} {msg.sender_last_name} · {(msg.sender_role ?? '').replace('_', ' ')}
         </Caption>
       )}
       <Body color={mine ? t.colors.bubbleMineText : t.colors.bubbleTheirsText}>
@@ -1099,6 +1635,25 @@ function KV({ k, v }) {
   );
 }
 
+// Tiny stat tile used inside the live-location card (speed / signal / battery).
+function Stat({ label, value }) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        flex: 1,
+        padding: t.spacing.s2,
+        backgroundColor: t.colors.card,
+        borderRadius: t.radius.lg,
+        alignItems: 'center',
+      }}
+    >
+      <Caption color={t.colors.textMuted}>{label}</Caption>
+      <BodyStrong>{value}</BodyStrong>
+    </View>
+  );
+}
+
 function CrewRow({ c }) {
   const t = useTheme();
   return (
@@ -1126,7 +1681,7 @@ function CrewRow({ c }) {
       </View>
       <View style={{ flex: 1 }}>
         <BodyStrong>{c.first_name} {c.last_name}</BodyStrong>
-        <Caption>{c.role.replace('_', ' ')}</Caption>
+        <Caption>{(c.role ?? '').replace('_', ' ')}</Caption>
       </View>
     </View>
   );

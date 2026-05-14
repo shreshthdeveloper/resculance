@@ -81,7 +81,7 @@ export default function ProfileScreen() {
             </BodyStrong>
             <Small style={{ marginTop: 2 }}>{user.email}</Small>
             <View style={{ flexDirection: 'row', gap: t.spacing.s2, marginTop: t.spacing.s3, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <Badge label={user.role.replace('_', ' ')} tone="primary" />
+              <Badge label={(user.role ?? 'user').replace('_', ' ')} tone="primary" />
               {user.organization ? (
                 <Badge label={user.organization.type?.replace('_', ' ') ?? 'org'} tone="neutral" />
               ) : null}
@@ -170,7 +170,7 @@ export default function ProfileScreen() {
               label="Help & support"
               sub="Email us at distrx.io@gmail.com"
               onPress={() =>
-                Linking.openURL('mailto:distrx.io@gmail.com?subject=Resulance%20help').catch(() =>
+                Linking.openURL('mailto:distrx.io@gmail.com?subject=resculance%20help').catch(() =>
                   Alert.alert('Help', 'Email distrx.io@gmail.com for support.'),
                 )
               }
@@ -188,7 +188,7 @@ export default function ProfileScreen() {
         />
 
         <Caption style={{ textAlign: 'center', marginTop: t.spacing.s4 }}>
-          Resulance Mobile v1.0.0
+          resculance Mobile v1.0.0
         </Caption>
       </ScrollView>
     </Screen>

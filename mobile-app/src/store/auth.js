@@ -73,6 +73,11 @@ export const useAuth = create((set, get) => ({
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        // `phone` was previously omitted from the cached slim object, so the
+        // edit-profile screen initialised its phone field to '' even when the
+        // backend had a real number — and saving an unchanged form would then
+        // clear it server-side (updateProfile treats '' as a real value).
+        phone: user.phone ?? '',
         profileImageUrl: user.profileImageUrl,
         role: user.role,
         organization: user.organizationId

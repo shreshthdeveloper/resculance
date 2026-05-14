@@ -1,9 +1,9 @@
-# Resulance — Smart Ambulance Management Platform
+# resculance — Smart Ambulance Management Platform
 
 A rewrite of the original `resculance_api` project on **Node.js + Express + MongoDB (Mongoose)**, keeping full feature parity with the existing React frontend.
 
 ```
-resulance/
+resculance/
 ├── backend/    # Node.js + Express + Mongoose (replaces the MySQL backend)
 └── frontend/   # React + Vite (copied from resculance_api/frontend, patched)
 ```
@@ -26,7 +26,7 @@ npm run dev                           # http://localhost:5000
 ```
 
 Default accounts:
-- superadmin → `admin@resulance.local` / `Admin@12345`
+- superadmin → `admin@resculance.local` / `Admin@12345`
 - everyone else (from `seed:sample`) → `Password@123`
   - Hospital admins: `admin@cityhospital.example`, `admin@greenlife.example`
   - Fleet admins: `admin@swiftmed.example`, `admin@carewheels.example`

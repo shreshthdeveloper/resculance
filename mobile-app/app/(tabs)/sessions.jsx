@@ -336,7 +336,7 @@ function SessionRow({ item, onPress, onOffboard }) {
           ) : null}
         </View>
         <View style={{ alignItems: 'flex-end', gap: 6 }}>
-          <Badge label={item.status.replace('_', ' ')} tone={toneForStatus(item.status)} />
+          <Badge label={(item.status ?? 'unknown').replace('_', ' ')} tone={toneForStatus(item.status)} />
           <Caption>
             {item.onboarded_at
               ? new Date(item.onboarded_at).toLocaleTimeString([], {

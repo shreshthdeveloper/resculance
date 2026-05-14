@@ -5,7 +5,7 @@ import { Image, View } from 'react-native';
 import { useTheme } from '../theme';
 import { Display, H1, Small } from './Text';
 
-const MARK = require('../../assets/images/resulance-mark.png');
+const MARK = require('../../assets/images/resculance-mark.png');
 
 export function LogoMark({ size = 56, style }) {
   return (
@@ -22,7 +22,7 @@ export function Wordmark({ size = 'large', subtitle }) {
   const Title = size === 'large' ? Display : H1;
   return (
     <View style={{ alignItems: 'center', gap: t.spacing.s2 }}>
-      <Title style={{ letterSpacing: -0.5 }}>Resulance</Title>
+      <Title style={{ letterSpacing: -0.5 }}>resculance</Title>
       {subtitle ? (
         <View
           style={{

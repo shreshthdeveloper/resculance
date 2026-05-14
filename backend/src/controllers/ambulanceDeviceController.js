@@ -67,26 +67,10 @@ class AmbulanceDeviceController {
         return next(new AppError('You do not have permission to manage devices on this ambulance', 403));
       }
 
-      // Same ambulance + same device_id is an upsert by design: the device
-      // is a physical asset and the user is re-saving its config. We keep
-      // pre-existing credentials when the new payload leaves them blank so
-      // a typo on the "Device Username" field doesn't wipe stored secrets.
-      const existing = await AmbulanceDevice.findOne({ ambulance_id: ambulanceId, device_id: deviceId });
-      if (existing) {
-        existing.device_name = deviceName;
-        existing.device_type = deviceType;
-        const newUsername = cleanOptional(deviceUsername);
-        const newPassword = cleanOptional(devicePassword);
-        const newApi = cleanOptional(deviceApi);
-        if (newUsername !== undefined) existing.device_username = newUsername;
-        if (newPassword !== undefined) existing.device_password = newPassword;
-        if (newApi !== undefined) existing.device_api = newApi;
-        if (manufacturer !== undefined) existing.manufacturer = cleanOptional(manufacturer) ?? null;
-        if (model !== undefined) existing.model = cleanOptional(model) ?? null;
-        await existing.save();
-        return success(res, 'Device already exists, updated successfully', shapeDevice(existing));
-      }
-
+      // Duplicate device_id values are permitted (e.g. the same physical
+      // tracker model used on multiple installs, or two channels of the
+      // same DVR). Every POST creates a new row — callers that want to
+      // mutate an existing device should use PUT /devices/:id with its dbId.
       const created = await AmbulanceDevice.create({
         ambulance_id: ambulanceId,
         device_name: deviceName,

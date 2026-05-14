@@ -94,7 +94,11 @@ export default function OnboardIndex() {
   }, [activeOrg?.id, isSuperadmin, gatedBySuperadminOrg, load, q]);
 
   const lookupCode = async () => {
-    const c = code.trim();
+    // Patient codes are generated server-side as `PAT-XXXXXX` (uppercase) and
+    // matched case-sensitively on the backend. Normalise here so a user
+    // who types `pat-abc123` on a keyboard that didn't capitalise (Android
+    // numeric/email keyboards often don't) still gets a hit instead of 404.
+    const c = code.trim().toUpperCase();
     if (!c) return;
     setCodeBusy(true);
     try {

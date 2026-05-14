@@ -455,22 +455,30 @@ function UserFormModal({ mode, user, visible, onClose, onSaved, isSuperadmin, ac
 
   const submit = async () => {
     if (!f.firstName?.trim()) return Alert.alert('Required', 'First name is required.');
-    if (!f.email?.trim()) return Alert.alert('Required', 'Email is required.');
+    if (mode === 'create' && !f.email?.trim()) {
+      return Alert.alert('Required', 'Email is required.');
+    }
     if (mode === 'create') {
       if (!f.password) return Alert.alert('Required', 'Password is required.');
       if (f.password !== f.confirmPassword) return Alert.alert('Mismatch', 'Passwords do not match.');
     }
     setBusy(true);
     try {
+      // The backend `UserController.update` only honours
+      // firstName, lastName, phone, status, role, organizationId,
+      // profileImageUrl (userController.js:228). Sending `email` or
+      // `username` on edit was silently dropped server-side — confusing
+      // for users who saw the modal accept the change but it never
+      // persisted. So we only include those fields on create.
       const payload = {
         firstName: f.firstName.trim(),
         lastName: f.lastName.trim() || undefined,
-        email: f.email.trim(),
-        username: f.username.trim() || undefined,
         phone: f.phone.trim() || undefined,
         role: f.role,
       };
       if (mode === 'create') {
+        payload.email = f.email.trim();
+        payload.username = f.username.trim() || undefined;
         payload.password = f.password;
         if (isSuperadmin && activeOrg) payload.organizationId = activeOrg.id;
       }
@@ -521,13 +529,20 @@ function UserFormModal({ mode, user, visible, onClose, onSaved, isSuperadmin, ac
             <Input label="First name *" value={f.firstName} onChangeText={(v) => set('firstName', v)} />
             <Input label="Last name" value={f.lastName} onChangeText={(v) => set('lastName', v)} />
             <Input
-              label="Email *"
+              label={mode === 'edit' ? 'Email (cannot be changed)' : 'Email *'}
               value={f.email}
-              onChangeText={(v) => set('email', v)}
+              onChangeText={mode === 'edit' ? undefined : (v) => set('email', v)}
+              editable={mode !== 'edit'}
               autoCapitalize="none"
               keyboardType="email-address"
             />
-            <Input label="Username" value={f.username} onChangeText={(v) => set('username', v)} autoCapitalize="none" />
+            <Input
+              label={mode === 'edit' ? 'Username (cannot be changed)' : 'Username'}
+              value={f.username}
+              onChangeText={mode === 'edit' ? undefined : (v) => set('username', v)}
+              editable={mode !== 'edit'}
+              autoCapitalize="none"
+            />
             <Input label="Phone" value={f.phone} onChangeText={(v) => set('phone', v)} keyboardType="phone-pad" />
           </Card>
 

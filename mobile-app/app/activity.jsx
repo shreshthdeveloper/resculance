@@ -232,10 +232,15 @@ function Pill({ label, active, onPress }) {
 
 function ActivityRow({ log }) {
   const t = useTheme();
-  // Best-effort field shape. Backend log fields vary (action, type,
-  // description, user_name, created_at, metadata). We display what's there.
-  const action = log.action ?? log.activity_type ?? log.type ?? 'event';
-  const description = log.description ?? log.message ?? log.summary ?? '';
+  // Backend ActivityLog schema (Mongo): { activity, comments, user_name,
+  // organization_name, metadata, created_at }. The pre-Mongo backend used
+  // different field names so the original fallback chain (`action`,
+  // `activity_type`, `type`, `description`, `message`, `summary`) never
+  // resolved against the new shape — every row rendered as "event" with no
+  // description. Put the real field names (`activity`, `comments`) at the
+  // front; keep the legacy ones as defensive fallbacks.
+  const action = log.activity ?? log.action ?? log.activity_type ?? log.type ?? 'event';
+  const description = log.comments ?? log.description ?? log.message ?? log.summary ?? '';
   const when = log.created_at ?? log.createdAt ?? log.timestamp;
   const userName =
     log.user_name ||

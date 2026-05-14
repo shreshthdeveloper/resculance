@@ -98,7 +98,7 @@ export async function registerForPushNotifications() {
     // Android needs an explicit channel before notifications render.
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
-        name: 'Resulance',
+        name: 'resculance',
         importance: Notifications.AndroidImportance.HIGH,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#14B8A6',

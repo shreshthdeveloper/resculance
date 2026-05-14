@@ -16,20 +16,20 @@ module.exports = ({ config }) => {
 
   return {
     ...config,
-    name: 'Resulance',
-    slug: 'resulance-mobile',
+    name: 'resculance',
+    slug: 'resculance-mobile',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
-    scheme: 'resulance',
+    scheme: 'resculance',
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.resulance.mobile',
+      bundleIdentifier: 'com.resculance.mobile',
     },
     android: {
-      package: 'com.resulance.mobile',
+      package: 'com.resculance.mobile',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
         foregroundImage: './assets/images/android-icon-foreground.png',

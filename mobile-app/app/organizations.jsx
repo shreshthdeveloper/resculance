@@ -382,8 +382,13 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
     if (mode === 'edit' && org) {
       setF({
         name: org.name ?? '',
+        // `code` is auto-generated server-side (HOSP-#### / FLEET-####) and
+        // not updatable via PUT — display read-only in edit mode only.
         code: org.code ?? '',
         type: org.type ?? 'hospital',
+        // `contactPerson` is REQUIRED by both POST and PUT
+        // (organizationController.js:53, :160) — missing it 400s the request.
+        contactPerson: org.contactPerson ?? '',
         email: org.email ?? '',
         phone: org.phone ?? '',
         address: org.address ?? '',
@@ -391,14 +396,17 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
         state: org.state ?? '',
         country: org.country ?? '',
         postalCode: org.postalCode ?? '',
-        registrationNumber: org.registrationNumber ?? '',
+        // `registrationNumber` was an SQL-era field that no longer exists on
+        // the Mongo Organization schema (only `license_number` is persisted).
+        // Removed the dead input below; keeping it would silently drop the
+        // value server-side and confuse users.
         licenseNumber: org.licenseNumber ?? '',
       });
     } else {
       setF({
         name: '',
-        code: '',
         type: 'hospital',
+        contactPerson: '',
         email: '',
         phone: '',
         address: '',
@@ -406,7 +414,6 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
         state: '',
         country: '',
         postalCode: '',
-        registrationNumber: '',
         licenseNumber: '',
       });
     }
@@ -417,6 +424,10 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
   const submit = async () => {
     if (!f.name?.trim()) {
       Alert.alert('Required', 'Name is required.');
+      return;
+    }
+    if (!f.contactPerson?.trim()) {
+      Alert.alert('Required', 'Contact person is required.');
       return;
     }
     if (!f.email?.trim()) {
@@ -430,6 +441,10 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
           .filter(([, v]) => typeof v === 'string' && v.trim() !== '')
           .map(([k, v]) => [k, v.trim()]),
       );
+      // `code` is auto-generated server-side on create and isn't accepted on
+      // update. Strip it from the payload either way so we don't surprise the
+      // user with a "field ignored" outcome.
+      delete payload.code;
       if (mode === 'edit' && org) {
         await updateOrganization(org.id, payload);
       } else {
@@ -475,7 +490,11 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
         <ScrollView contentContainerStyle={{ padding: t.spacing.s5 }}>
           <Card padding="s5">
             <Input label="Name *" value={f.name} onChangeText={(v) => set('name', v)} />
-            <Input label="Code" value={f.code} onChangeText={(v) => set('code', v)} autoCapitalize="characters" />
+            {mode === 'edit' && f.code ? (
+              // Code is server-generated and immutable. Show it as read-only
+              // context in edit mode; omit entirely on create.
+              <Input label="Code" value={f.code} editable={false} />
+            ) : null}
             <View style={{ flexDirection: 'row', gap: t.spacing.s2, marginBottom: t.spacing.s4 }}>
               <TypeToggle
                 label="Hospital"
@@ -488,6 +507,7 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
                 onPress={() => set('type', 'fleet_owner')}
               />
             </View>
+            <Input label="Contact person *" value={f.contactPerson} onChangeText={(v) => set('contactPerson', v)} />
             <Input label="Email *" value={f.email} onChangeText={(v) => set('email', v)} autoCapitalize="none" keyboardType="email-address" />
             <Input label="Phone" value={f.phone} onChangeText={(v) => set('phone', v)} keyboardType="phone-pad" />
           </Card>
@@ -513,7 +533,6 @@ function OrgFormModal({ mode, org, visible, onClose, onSaved }) {
           </Card>
 
           <Card padding="s5" style={{ marginTop: t.spacing.s4 }}>
-            <Input label="Registration number" value={f.registrationNumber} onChangeText={(v) => set('registrationNumber', v)} />
             <Input label="License number" value={f.licenseNumber} onChangeText={(v) => set('licenseNumber', v)} />
           </Card>
         </ScrollView>

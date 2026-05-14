@@ -1,7 +1,7 @@
 {
-  "name": "resulance-backend",
+  "name": "resculance-backend",
   "version": "1.0.0",
-  "description": "Resulance Smart Ambulance Management Platform API (MongoDB)",
+  "description": "resculance Smart Ambulance Management Platform API (MongoDB)",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -15,7 +15,7 @@
     "management",
     "mongodb"
   ],
-  "author": "Resulance Team",
+  "author": "resculance Team",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.13.1",

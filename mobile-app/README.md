@@ -1,6 +1,6 @@
-# Resulance Mobile (Expo SDK 54)
+# resculance Mobile (Expo SDK 54)
 
-Paramedic-focused mobile companion to the Resulance backend, built with
+Paramedic-focused mobile companion to the resculance backend, built with
 Expo SDK 54 + expo-router (plain JavaScript, no TypeScript). Same `/api/v1`
 REST API and Socket.IO channel as [the web frontend](../frontend), with a
 design system that mirrors the frontend's tokens (teal primary `#14B8A6`,

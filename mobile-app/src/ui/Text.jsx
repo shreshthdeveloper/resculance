@@ -50,14 +50,16 @@ function variants(t) {
       size: t.fontSize.xl,
       fontFamily: t.fontFamily.display,
       fontWeight: '600',
-      lineHeight: t.fontSize.xl * 1.25,
+      // Tightened from 1.25 → 1.2 so section headers don't dominate cards.
+      lineHeight: t.fontSize.xl * 1.2,
     },
     h3: {
       color: t.colors.text,
       size: t.fontSize.lg,
       fontFamily: t.fontFamily.bodySemibold,
       fontWeight: '600',
-      lineHeight: t.fontSize.lg * 1.3,
+      // Tightened from 1.3 → 1.2 for the same reason.
+      lineHeight: t.fontSize.lg * 1.2,
     },
     body: {
       color: t.colors.text,

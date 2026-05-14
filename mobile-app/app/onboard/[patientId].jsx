@@ -305,7 +305,7 @@ export default function ConfirmOnboardScreen() {
                               <Caption>{a.registration_number}</Caption>
                             </View>
                             <Badge
-                              label={a.status.replace('_', ' ')}
+                              label={(a.status ?? 'unknown').replace('_', ' ')}
                               tone={toneForStatus(a.status)}
                             />
                           </View>

@@ -111,15 +111,24 @@ export const fontFamily = {
   displayBold: 'Poppins_700Bold',
 };
 
+// Tightened type scale (was xs:11 / sm:13 / base:15 / md:16 / lg:18 / xl:22 /
+// xxl:28 / display:34). The original scale was scaled up for tablet-style
+// readability and looked oversized on phones — page titles eating half the
+// header, "live camera feed" labels rivaling H2s on the web, etc. The new
+// values land closer to native iOS/Android system densities (SF/Roboto
+// 13/15/17/20) so the app reads as a focused tool rather than a marketing
+// page. Spacing tokens were left untouched on purpose: a lot of screens
+// reference `s5`/`s6` directly, so changing those values shifts every
+// padding/gap globally and would require a screen-by-screen review.
 export const fontSize = {
-  xs: 11,
-  sm: 13,
-  base: 15,
-  md: 16,
-  lg: 18,
-  xl: 22,
-  xxl: 28,
-  display: 34,
+  xs: 10,
+  sm: 12,
+  base: 14,
+  md: 15,
+  lg: 16,
+  xl: 18,
+  xxl: 22,
+  display: 28,
 };
 
 // matches `.shadow-soft` (0 2px 8px rgba(0,0,0,0.06)) and the hover variant.

@@ -196,7 +196,7 @@ export default function DashboardScreen() {
                   {activeSession.patient_first_name} {activeSession.patient_last_name}
                 </H3>
                 <Small color="rgba(255,255,255,0.85)">
-                  {activeSession.status.replace('_', ' ')}
+                  {(activeSession.status ?? 'active').replace('_', ' ')}
                 </Small>
               </View>
             </View>
@@ -313,7 +313,7 @@ export default function DashboardScreen() {
                     <Small>{ambulance.registration_number}</Small>
                   </View>
                   <Badge
-                    label={ambulance.status.replace('_', ' ')}
+                    label={(ambulance.status ?? 'unknown').replace('_', ' ')}
                     tone={toneForStatus(ambulance.status)}
                   />
                 </View>

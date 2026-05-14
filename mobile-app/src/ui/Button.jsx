@@ -88,9 +88,16 @@ function variantStyles(c) {
 }
 
 function sizeStyles(spacing, fontSize) {
+  // Padding kept generous so buttons clear the 44pt iOS HIG / 48pt Material
+  // tap-target minimum. An earlier pass shaved padY to 6 / 10 / 12 in
+  // pursuit of a "tighter" look but combined with the smaller font scale
+  // it produced ~24/34/39pt buttons — on the onboarding screen the side-
+  // by-side "Enter code" / "New patient" row read as faint pills you
+  // couldn't reliably hit. These values restore proper hitboxes while the
+  // smaller fontSize still keeps the visual density.
   return {
     sm: { padX: spacing.s3, padY: spacing.s2, fontSize: fontSize.sm },
     md: { padX: spacing.s4, padY: spacing.s3, fontSize: fontSize.base },
-    lg: { padX: spacing.s6, padY: spacing.s4, fontSize: fontSize.lg },
+    lg: { padX: spacing.s6, padY: spacing.s4, fontSize: fontSize.md },
   };
 }

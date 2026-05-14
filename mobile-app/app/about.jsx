@@ -28,7 +28,7 @@ export default function AboutScreen() {
       >
         <View style={{ alignItems: 'center', paddingVertical: t.spacing.s6 }}>
           <LogoMark size={80} />
-          <Display style={{ marginTop: t.spacing.s4, fontSize: 32 }}>Resulance</Display>
+          <Display style={{ marginTop: t.spacing.s4, fontSize: 32 }}>resculance</Display>
           <Caption style={{ marginTop: 4 }}>Smart Ambulance Platform</Caption>
           <Caption style={{ marginTop: t.spacing.s3 }}>Version 1.0.0</Caption>
         </View>
@@ -36,7 +36,7 @@ export default function AboutScreen() {
         <Card padding="s5" style={{ alignSelf: 'stretch' }}>
           <SectionHeader title="What this app does" />
           <Body color={t.colors.textSecondary}>
-            Resulance Mobile is the paramedic companion to the Resulance backend.
+            resculance Mobile is the paramedic companion to the resculance backend.
             Sign in, view your assigned ambulance, onboard patients, record vital
             signs, chat with the crew in real time, and offboard sessions on arrival.
           </Body>
@@ -46,7 +46,7 @@ export default function AboutScreen() {
           <SectionHeader title="Built with" />
           <Row icon="logo-react" label="React Native" sub="0.81" />
           <Row icon="rocket-outline" label="Expo SDK 54" sub="expo-router 6" />
-          <Row icon="cloud-outline" label="Resulance backend" sub="REST + Socket.IO" />
+          <Row icon="cloud-outline" label="resculance backend" sub="REST + Socket.IO" />
         </Card>
 
         <Card padding="s5" style={{ alignSelf: 'stretch' }}>
@@ -69,7 +69,7 @@ export default function AboutScreen() {
         </Card>
 
         <Small color={t.colors.textMuted} style={{ textAlign: 'center', marginTop: t.spacing.s5 }}>
-          © {new Date().getFullYear()} Resulance Team
+          © {new Date().getFullYear()} resculance Team
         </Small>
       </ScrollView>
     </Screen>

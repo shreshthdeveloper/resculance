@@ -68,7 +68,7 @@ export function SplashScreen({ tagline = 'Smart Ambulance Platform' }) {
         </Animated.View>
 
         <View style={{ alignItems: 'center', marginTop: t.spacing.s6, gap: t.spacing.s2 }}>
-          <Display style={{ letterSpacing: -0.5, fontSize: 36 }}>Resulance</Display>
+          <Display style={{ letterSpacing: -0.5, fontSize: 36 }}>resculance</Display>
           <Small
             color={t.colors.textSecondary}
             style={{ textTransform: 'uppercase', letterSpacing: 2.5, fontWeight: '600' }}

@@ -55,9 +55,14 @@ export async function getActiveSessionForAmbulance(ambulanceId) {
 }
 
 // GET /sessions/stats — aggregate counts by status.
+// Backend wraps in `{ stats: {...} }` (sessionController.js:195). Unwrap so
+// callers get the flat counts object directly (total_sessions, onboarded,
+// in_transit, offboarded, cancelled, avg_duration_minutes). The previous
+// `res.data.data ?? {}` returned the wrapper itself, so every consumer read
+// `undefined` for the counts.
 export async function getSessionStats() {
   const res = await api.get('/sessions/stats');
-  return res.data.data ?? {};
+  return res.data.data?.stats ?? res.data.data ?? {};
 }
 
 // Returns { session, vitals, communications }. Uses the patient-routes
@@ -90,7 +95,11 @@ export async function markMessageRead(messageId) {
 
 export async function getUnreadMessageCount(sessionId) {
   const res = await api.get(`/patients/sessions/${sessionId}/unread-count`);
-  return Number(res.data.data?.count ?? 0);
+  // Backend returns `{ unreadCount: count }` (patientController.js:1360).
+  // The original code read `data?.count`, which is always undefined → badge
+  // never updated. Tolerate the legacy `count` shape too in case any
+  // pre-refactor server is still in the wild.
+  return Number(res.data.data?.unreadCount ?? res.data.data?.count ?? 0);
 }
 
 export async function addVitalSigns(patientId, input) {

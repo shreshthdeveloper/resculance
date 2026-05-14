@@ -136,7 +136,7 @@ export default function MyAmbulanceScreen() {
                   <Body color={t.colors.textSecondary}>{item.registration_number}</Body>
                 </View>
                 <Badge
-                  label={item.status.replace('_', ' ')}
+                  label={(item.status ?? 'unknown').replace('_', ' ')}
                   tone={toneForStatus(item.status)}
                   dot
                 />
@@ -190,7 +190,7 @@ export default function MyAmbulanceScreen() {
                         {session.patient_first_name} {session.patient_last_name}
                       </BodyStrong>
                       <Small color={t.colors.primary} style={{ fontWeight: '600' }}>
-                        {session.session_code} · {session.status.replace('_', ' ')}
+                        {session.session_code} · {(session.status ?? 'unknown').replace('_', ' ')}
                       </Small>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={t.colors.primary} />

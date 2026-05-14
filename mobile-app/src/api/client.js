@@ -1,4 +1,4 @@
-// Axios instance for the Resulance backend.
+// Axios instance for the resculance backend.
 //
 // - Reads accessToken/refreshToken from secure storage on every request.
 // - On a 401, swaps in a fresh access token via /auth/refresh-token and retries

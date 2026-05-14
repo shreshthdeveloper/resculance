@@ -7,7 +7,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   View,
 } from 'react-native';
@@ -108,19 +107,12 @@ export default function LoginScreen() {
               onSubmitEditing={onSubmit}
             />
 
-            <View
-              style={{
-                flexDirection: 'row',
-                justifyContent: 'flex-end',
-                marginBottom: t.spacing.s4,
-              }}
-            >
-              <Pressable hitSlop={8}>
-                <Small color={t.colors.primary} style={{ fontWeight: '600' }}>
-                  Forgot password?
-                </Small>
-              </Pressable>
-            </View>
+            {/* "Forgot password?" was a no-op Pressable (no onPress, no
+                handler, no backend route). Removed to avoid the dead
+                affordance. Backend hint: POST /auth/forgot-password exists
+                (authController.forgotPassword) but it currently just logs
+                the token to the server console — re-add the UI once that's
+                wired to email or surfaces the token. */}
 
             <Button
               label={busy ? 'Signing in…' : 'Sign in'}

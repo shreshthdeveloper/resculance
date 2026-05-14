@@ -10,6 +10,10 @@ function buildOrgPayload(body) {
   if (body.address !== undefined) payload.address = body.address;
   if (body.city !== undefined) payload.city = body.city;
   if (body.state !== undefined) payload.state = body.state;
+  // `country` exists on the schema (default 'India') but was previously
+  // missing from this allowlist, so any value sent from the client was
+  // silently dropped. Honor it now.
+  if (body.country !== undefined) payload.country = body.country;
 
   const pincode = body.zipCode || body.postalCode || body.pincode;
   if (pincode !== undefined) payload.pincode = pincode;
