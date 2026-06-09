@@ -5,12 +5,22 @@ import { Card } from '../ui/Card';
 export default function VehicleInfoModal({ isOpen, onClose, session, ambulance }) {
   if (!isOpen) return null;
 
-  // Use actual ambulance data from props
+  // Map the ambulance vehicle_type enum (BLS/ALS/SCU) to a friendly label.
+  const TYPE_LABELS = {
+    BLS: 'Basic Life Support',
+    ALS: 'Advanced Life Support',
+    SCU: 'Specialty Care Unit',
+  };
+  const rawType = ambulance?.vehicle_type || ambulance?.type;
+
+  // Use actual ambulance data from props. NOTE: the API returns `vehicle_model`
+  // and `vehicle_type` — the old `model`/`type` reads were always undefined,
+  // which is why Type was stuck on the hardcoded "Basic Life Support".
   const ambulanceInfo = {
     code: session?.ambulance_code || session?.ambulanceCode || 'N/A',
     registration: ambulance?.registration_number || ambulance?.registrationNumber || 'N/A',
-    model: ambulance?.model || 'N/A',
-    type: ambulance?.type || 'Basic Life Support',
+    model: ambulance?.vehicle_model || ambulance?.model || 'N/A',
+    type: rawType ? (TYPE_LABELS[rawType] || rawType) : 'N/A',
   };
 
   // Build crew members array from session data (doctors, paramedics, drivers)
@@ -72,11 +82,11 @@ export default function VehicleInfoModal({ isOpen, onClose, session, ambulance }
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               transition={{ type: "spring", duration: 0.5 }}
-              className="w-full max-w-4xl pointer-events-auto"
+              className="w-full max-w-2xl pointer-events-auto"
             >
               <Card className="bg-white dark:bg-gray-900 shadow-2xl max-h-[85vh] flex flex-col">
                 {/* Header */}
-                <div className="bg-gradient-to-r from-slate-700 to-slate-800 dark:from-slate-800 dark:to-slate-900 px-6 py-5 flex-shrink-0">
+                <div className="bg-gradient-to-r from-slate-700 to-slate-800 dark:from-slate-800 dark:to-slate-900 px-5 py-4 flex-shrink-0">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="p-2.5 bg-white/10 rounded-lg backdrop-blur-sm">
@@ -99,9 +109,9 @@ export default function VehicleInfoModal({ isOpen, onClose, session, ambulance }
                 </div>
 
                 {/* Content - Scrollable */}
-                <div className="p-6 overflow-y-auto flex-1">
+                <div className="p-5 overflow-y-auto flex-1">
                   {/* Vehicle Details */}
-                  <div className="mb-6">
+                  <div className="mb-5">
                     <div className="flex items-center gap-2 mb-4">
                       <div className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
                         <Truck className="w-5 h-5 text-slate-700 dark:text-slate-300" />

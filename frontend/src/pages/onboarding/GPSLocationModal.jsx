@@ -215,24 +215,24 @@ export const GPSLocationModal = ({ isOpen, onClose, session, ambulance }) => {
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
-          className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden"
+          className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full ${devices.length > 1 ? 'max-w-5xl' : 'max-w-xl'} max-h-[88vh] flex flex-col overflow-hidden`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-border bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600">
-            <div>
-              <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
-                  <MapPin className="w-6 h-6" />
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 sm:p-6 border-b border-border bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 flex-shrink-0">
+            <div className="min-w-0">
+              <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm flex-shrink-0">
+                  <MapPin className="w-5 h-5 sm:w-6 sm:h-6" />
                 </div>
                 Live GPS Tracking
               </h2>
-              <p className="text-sm text-blue-100 mt-1">
-                Ambulance: {ambulance?.registration_number || ambulance?.vehicleNumber} • 
+              <p className="text-xs sm:text-sm text-blue-100 mt-1 break-words">
+                Ambulance: {ambulance?.registration_number || ambulance?.vehicleNumber} •
                 Trip ID: {session?.id}
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-shrink-0 self-end sm:self-auto">
               <button
                 onClick={() => setAutoRefresh(!autoRefresh)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${
@@ -254,7 +254,7 @@ export const GPSLocationModal = ({ isOpen, onClose, session, ambulance }) => {
           </div>
 
           {/* Content */}
-          <div className="p-6">
+          <div className="p-4 sm:p-6 flex-1 overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center h-96">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -266,7 +266,7 @@ export const GPSLocationModal = ({ isOpen, onClose, session, ambulance }) => {
                 <p className="text-sm">Add GPS tracking devices to this ambulance to view live location</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className={`grid gap-6 ${devices.length > 1 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
                 {devices.map((device, index) => {
                   const location = deviceLocations[device.id];
                   const status = deviceStatus[device.id];
@@ -391,7 +391,7 @@ export const GPSLocationModal = ({ isOpen, onClose, session, ambulance }) => {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t border-border bg-slate-50 dark:bg-slate-900">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 sm:p-6 border-t border-border bg-slate-50 dark:bg-slate-900 flex-shrink-0">
             <div className="text-sm text-secondary">
               Tracking: <span className="font-medium text-text">{devices.length} Device{devices.length !== 1 ? 's' : ''}</span>
             </div>

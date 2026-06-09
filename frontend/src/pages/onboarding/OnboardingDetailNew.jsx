@@ -95,6 +95,10 @@ export default function OnboardingDetail() {
   const inlineJitsiApiRef = useRef(null);
   const [inlineJitsiJoined, setInlineJitsiJoined] = useState(false);
   const [inlineJitsiLoading, setInlineJitsiLoading] = useState(false);
+  // Set when the user offboards from this console, so the incoming
+  // `session_ended` socket event doesn't redirect to /onboarding and override
+  // our redirect to the session detail page.
+  const selfOffboardingRef = useRef(false);
 
   const footerVisible = !(
     showCameraModal || showGPSModal || showChat || showVideoCall || showVehicleInfo || showDeleteModal || showOffboardModal || showInlineVideo
@@ -213,6 +217,12 @@ export default function OnboardingDetail() {
 
     const handleSessionEnded = (data) => {
       console.log('🛑 Session ended event received:', data);
+      // If we ended it ourselves via Offboard, our own handler redirects to the
+      // session detail page — don't bounce to /onboarding here.
+      if (selfOffboardingRef.current) {
+        console.log('↩️ Self-offboard in progress, skipping session_ended redirect');
+        return;
+      }
       // Check if this event is for the current session
       if (String(data.sessionId) === String(sessionId)) {
         console.log('✅ This session has been ended. Redirecting to onboarding page...');
@@ -402,10 +412,13 @@ export default function OnboardingDetail() {
 
   const handleConfirmOffboard = async () => {
     try {
+      selfOffboardingRef.current = true;
       await patientService.offboard(sessionId, { treatmentNotes: 'Patient offboarded from Command Console' });
       toast.success('Patient offboarded successfully');
-      navigate('/onboarding');
+      // Take the user straight to the completed session's detail page.
+      navigate(`/sessions/${sessionId}`);
     } catch (error) {
+      selfOffboardingRef.current = false;
       console.error('Failed to offboard patient:', error);
       toast.error('Failed to offboard patient');
     } finally {
@@ -491,14 +504,6 @@ export default function OnboardingDetail() {
               title="Group Chat"
             >
               <MessageCircle className="w-4 h-4" />
-            </button>
-            
-            <button
-              onClick={() => setShowVideoCall(true)}
-              className="p-2 rounded-lg bg-success hover:bg-green-700 text-white transition-colors shadow-sm"
-              title="Video Call"
-            >
-              <Video className="w-4 h-4" />
             </button>
             
             {session.status?.toLowerCase() !== 'offboarded' && isActive && (

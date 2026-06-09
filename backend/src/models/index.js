@@ -18,5 +18,6 @@ module.exports = {
   Partnership: require('./Partnership'),
   ActivityLog: require('./ActivityLog'),
   AuditLog: require('./AuditLog'),
-  RefreshToken: require('./RefreshToken')
+  RefreshToken: require('./RefreshToken'),
+  AppSetting: require('./AppSetting')
 };

@@ -16,7 +16,10 @@ import {
   Calendar,
   Search,
   AlertTriangle,
+  List,
+  Network,
 } from 'lucide-react';
+import PartnershipMatrixTree from '../../components/collaborations/PartnershipMatrixTree';
 
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -110,6 +113,8 @@ export const Collaborations = () => {
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const { user } = useAuthStore();
+  const isSuperadmin = user?.role === 'superadmin';
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'tree'
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Auto-open create modal if coming from quick actions
@@ -577,12 +582,38 @@ export const Collaborations = () => {
             </div>
           </div>
         </div>
-        <Button onClick={() => setShowModal(true)} className="gap-2">
-          <Plus className="w-5 h-5" />
-          New Partnership
-        </Button>
+        <div className="flex items-center gap-3">
+          {isSuperadmin && (
+            <div className="inline-flex rounded-xl bg-gray-100 p-1">
+              <button
+                onClick={() => setViewMode('list')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  viewMode === 'list' ? 'bg-white text-primary shadow-sm' : 'text-gray-500'
+                }`}
+              >
+                <List className="w-4 h-4" /> List
+              </button>
+              <button
+                onClick={() => setViewMode('tree')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  viewMode === 'tree' ? 'bg-white text-primary shadow-sm' : 'text-gray-500'
+                }`}
+              >
+                <Network className="w-4 h-4" /> Tree
+              </button>
+            </div>
+          )}
+          <Button onClick={() => setShowModal(true)} className="gap-2">
+            <Plus className="w-5 h-5" />
+            New Partnership
+          </Button>
+        </div>
       </motion.div>
 
+      {isSuperadmin && viewMode === 'tree' && <PartnershipMatrixTree />}
+
+      {viewMode === 'list' && (
+      <>
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <motion.div
@@ -705,6 +736,8 @@ export const Collaborations = () => {
           )}
         </Card>
       </motion.div>
+      </>
+      )}
 
       {/* Create Modal (New Partnership) */}
       <Modal

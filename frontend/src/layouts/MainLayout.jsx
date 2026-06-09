@@ -7,7 +7,7 @@ import {
   Users,
   Ambulance,
   UserSquare2,
-  Activity,
+  HeartPulse,
   Settings,
   LogOut,
   Menu,
@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Wrench,
   ClipboardList,
+  Handshake,
+  History,
   Moon,
   Sun,
   Shield,
@@ -49,10 +51,10 @@ const Sidebar = ({ isOpen, toggleSidebar, collapsed, toggleCollapse, isDesktop }
     { path: '/users', icon: Users, label: 'Users', key: 'users' },
     { path: '/ambulances', icon: Ambulance, label: 'Ambulances', key: 'ambulances' },
     { path: '/patients', icon: UserSquare2, label: 'Patients', key: 'patients' },
-    { path: '/onboarding', icon: Activity, label: 'Onboarding', key: 'onboarding' },
+    { path: '/onboarding', icon: HeartPulse, label: 'Onboarding', key: 'onboarding' },
     { path: '/sessions', icon: ClipboardList, label: 'Sessions', key: 'sessions' },
-    { path: '/collaborations', icon: Building2, label: 'Partnerships', key: 'collaborations' },
-    { path: '/activity', icon: ClipboardList, label: 'Activity Logs', key: 'activity' },
+    { path: '/collaborations', icon: Handshake, label: 'Partnerships', key: 'collaborations' },
+    { path: '/activity', icon: History, label: 'Activity Logs', key: 'activity' },
     { path: '/permissions', icon: Shield, label: 'Permissions', key: 'permissions' },
   ];
 
@@ -301,7 +303,7 @@ const Topbar = ({ toggleSidebar, toggleCollapse, sidebarCollapsed }) => {
     { label: 'New User', path: '/users?create=true', icon: Users },
     { label: 'New Ambulance', path: '/ambulances?create=true', icon: Ambulance },
     { label: 'New Patient', path: '/patients?create=true', icon: UserSquare2 },
-    { label: 'New Onboarding', path: '/onboarding', icon: Activity },
+    { label: 'New Onboarding', path: '/onboarding', icon: HeartPulse },
   ];
 
   // refs for click-outside handling

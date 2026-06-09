@@ -109,21 +109,25 @@ export const Onboarding = () => {
     if (!offboardTarget || !offboardSession) return;
     
     setSubmitting(true);
+    const offboardedSessionId = offboardSession.id;
     try {
-      await patientService.offboard(offboardSession.id, { treatmentNotes: 'Patient offboarded from table view' });
+      await patientService.offboard(offboardedSessionId, { treatmentNotes: 'Patient offboarded from table view' });
       toast.success('Patient offboarded successfully');
-      // Refresh ambulances and patients
-      await fetchAmbulances();
-      await fetchPatients();
+      setShowOffboardModal(false);
+      setOffboardTarget(null);
+      setOffboardSession(null);
+      // Take the user straight to the completed session's detail page.
+      navigate(`/sessions/${offboardedSessionId}`);
+      return;
     } catch (error) {
       console.error('Failed to offboard patient:', error);
       const msg = error?.response?.data?.error || error?.response?.data?.message || 'Failed to offboard patient';
       toast.error(msg);
-    } finally {
-      setSubmitting(false);
       setShowOffboardModal(false);
       setOffboardTarget(null);
       setOffboardSession(null);
+    } finally {
+      setSubmitting(false);
     }
   };
 

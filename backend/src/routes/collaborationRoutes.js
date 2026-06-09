@@ -18,6 +18,12 @@ router.post(
 
 router.get('/', CollaborationController.getAll);
 router.get('/partnerships/my', CollaborationController.getMyPartnerships);
+
+// Direct partnership management (the tree/matrix manager) — superadmin only.
+// Registered before '/:id' so the literal paths aren't swallowed by it.
+router.patch('/partnerships/set', authorize(ROLES.SUPERADMIN), CollaborationController.setPartnership);
+router.patch('/partnerships/bulk', authorize(ROLES.SUPERADMIN), CollaborationController.bulkSetPartnerships);
+
 router.get('/:id', CollaborationController.getById);
 
 router.patch('/:id/accept',

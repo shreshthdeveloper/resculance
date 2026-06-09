@@ -13,11 +13,13 @@ import {
   Clock,
   Ambulance as AmbulanceIcon,
   User,
-  MapPin
+  MapPin,
+  Share2
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Table } from '../../components/ui/Table';
+import ShareSessionModal from '../../components/sessions/ShareSessionModal';
 import { sessionService, organizationService } from '../../services';
 import Select from '../../components/ui/Select';
 import { useToast } from '../../hooks/useToast';
@@ -47,6 +49,7 @@ export default function Sessions() {
   const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 0, limit: 20 });
+  const [shareSession, setShareSession] = useState(null);
 
   useEffect(() => {
     // Only fetch when not superadmin or when superadmin has selected an organization
@@ -279,10 +282,20 @@ export default function Sessions() {
     {
       header: 'Actions',
       render: (row) => (
-        <Button size="sm" variant="secondary" onClick={() => handleViewSession(row)}>
-          <Eye className="w-4 h-4 mr-1" />
-          View
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={() => handleViewSession(row)}>
+            <Eye className="w-4 h-4 mr-1" />
+            View
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShareSession(row)}
+            title="Share session"
+          >
+            <Share2 className="w-4 h-4" />
+          </Button>
+        </div>
       ),
     },
   ];
@@ -552,6 +565,13 @@ export default function Sessions() {
           )}
         </>
       )}
+
+      <ShareSessionModal
+        isOpen={!!shareSession}
+        onClose={() => setShareSession(null)}
+        sessionId={shareSession?.id}
+        sessionCode={shareSession?.session_code}
+      />
     </div>
   );
 }

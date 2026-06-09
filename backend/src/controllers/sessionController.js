@@ -2,6 +2,7 @@ const { PatientSession, Organization, Ambulance } = require('../models');
 const { AppError } = require('../middleware/auth');
 const { success } = require('../utils/response');
 const { isValidId, equalIds } = require('../utils/ids');
+const { verifyPublicSharePin } = require('./settingsController');
 
 function shapeSession(s) {
   if (!s) return null;
@@ -193,6 +194,36 @@ class SessionController {
       delete stats._id;
 
       return success(res, 'OK', { stats });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // POST /public/sessions/:sessionId   (no auth — gated by the superadmin PIN)
+  // Body: { pin }. Returns the same read-only session payload as
+  // getSessionMetadata, but without org-scoped access checks.
+  static async getPublicSessionMetadata(req, res, next) {
+    try {
+      const { sessionId } = req.params;
+      if (!isValidId(sessionId)) return next(new AppError('Invalid session id', 400));
+
+      const result = await verifyPublicSharePin(req.body?.pin);
+      if (result === 'disabled') return next(new AppError('Public sharing is currently disabled', 403));
+      if (result === 'no_pin') return next(new AppError('Public sharing is not configured', 403));
+      if (result !== 'ok') return next(new AppError('Invalid PIN', 403));
+
+      const session = await PatientSession.findById(sessionId)
+        .populate('patient_id', 'first_name last_name')
+        .populate({
+          path: 'ambulance_id',
+          select: 'ambulance_code registration_number organization_id'
+        })
+        .populate('organization_id', 'name type')
+        .populate('destination_hospital_id', 'name')
+        .lean();
+      if (!session) return next(new AppError('Session not found', 404));
+
+      return success(res, 'OK', { session: shapeSession(session) });
     } catch (err) {
       next(err);
     }

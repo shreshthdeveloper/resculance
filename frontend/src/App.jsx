@@ -22,8 +22,26 @@ import { PermissionsManagement } from './pages/settings/PermissionsManagement';
 import Notifications from './pages/notifications/Notifications';
 import Sessions from './pages/sessions/Sessions';
 import SessionDetail from './pages/sessions/SessionDetail';
+import PublicSessionView from './pages/sessions/PublicSessionView';
 import { useAuthStore } from './store/authStore';
 import { PERMISSIONS } from './utils/permissions';
+
+// Auth-aware wrapper for the session detail route. Authenticated users see the
+// full in-app page; unauthenticated visitors get the public PIN-gated view.
+function SessionDetailRoute() {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  if (isAuthenticated) {
+    return (
+      <ProtectedRoute>
+        <MainLayout>
+          <SessionDetail />
+        </MainLayout>
+      </ProtectedRoute>
+    );
+  }
+  return <PublicSessionView />;
+}
 
 function App() {
   const initialize = useAuthStore((state) => state.initialize);
@@ -188,16 +206,10 @@ function App() {
             }
           />
 
-          <Route
-            path="/sessions/:sessionId"
-            element={
-              <ProtectedRoute>
-                <MainLayout>
-                  <SessionDetail />
-                </MainLayout>
-              </ProtectedRoute>
-            }
-          />
+          {/* Session detail doubles as a public, PIN-gated, read-only share
+              page: logged-in users get the full in-app view; everyone else
+              gets the standalone PublicSessionView. */}
+          <Route path="/sessions/:sessionId" element={<SessionDetailRoute />} />
 
           {/* Redirect /dashboard to dashboard or login based on auth */}
           <Route 

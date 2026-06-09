@@ -10,11 +10,13 @@ import {
   Building2,
   Save,
   CheckCircle,
+  Share2,
+  Globe,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card } from '../../components/ui/Card';
-import { authService } from '../../services';
+import { authService, settingsService } from '../../services';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../hooks/useToast';
 import { useRef } from 'react';
@@ -51,6 +53,44 @@ export const Settings = () => {
   const fileInputRef = useRef(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
+
+  const isSuperadmin = user?.role === 'superadmin';
+
+  // Public session-sharing config (superadmin only)
+  const [shareConfig, setShareConfig] = useState({ enabled: false, requirePin: true, hasPin: false });
+  const [sharePin, setSharePin] = useState('');
+  const [shareSaving, setShareSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isSuperadmin) return;
+    settingsService
+      .getPublicShare()
+      .then((res) => {
+        const data = res.data?.data || res.data || {};
+        setShareConfig({ enabled: !!data.enabled, requirePin: data.requirePin !== false, hasPin: !!data.hasPin });
+      })
+      .catch((err) => console.error('Failed to load public-share config', err));
+  }, [isSuperadmin]);
+
+  const saveShareConfig = async (changes) => {
+    try {
+      setShareSaving(true);
+      const payload = {};
+      if (typeof changes.enabled === 'boolean') payload.enabled = changes.enabled;
+      if (typeof changes.requirePin === 'boolean') payload.requirePin = changes.requirePin;
+      if (changes.pin) payload.pin = changes.pin;
+      const res = await settingsService.updatePublicShare(payload);
+      const data = res.data?.data || res.data || {};
+      setShareConfig({ enabled: !!data.enabled, requirePin: data.requirePin !== false, hasPin: !!data.hasPin });
+      setSharePin('');
+      toast.success('Public sharing settings updated');
+    } catch (err) {
+      console.error('Failed to update public-share config', err);
+      toast.error(err.response?.data?.message || 'Failed to update settings');
+    } finally {
+      setShareSaving(false);
+    }
+  };
 
   const {
     register: registerProfile,
@@ -120,6 +160,7 @@ export const Settings = () => {
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'password', label: 'Password', icon: Lock },
     { id: 'organization', label: 'Organization', icon: Building2 },
+    ...(isSuperadmin ? [{ id: 'sharing', label: 'Public Sharing', icon: Share2 }] : []),
   ];
 
   return (
@@ -380,6 +421,124 @@ export const Settings = () => {
                     <span className="inline-flex px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm font-medium">
                       Active
                     </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Public Sharing Tab (superadmin only) */}
+            {activeTab === 'sharing' && isSuperadmin && (
+              <div>
+                <div className="mb-6">
+                  <h2 className="text-2xl font-bold mb-2">Public Session Sharing</h2>
+                  <p className="text-secondary">
+                    Control the read-only public session links. Visitors must enter the access PIN to view a shared session.
+                  </p>
+                </div>
+
+                <div className="space-y-6">
+                  {/* 1. Master enable toggle */}
+                  <div className="flex items-center justify-between p-4 border border-border rounded-2xl">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Globe className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">Enable public sharing</p>
+                        <p className="text-sm text-secondary">
+                          Master switch. When on, shared session links open a read-only page. When off, every shared link is blocked.
+                          {shareConfig.requirePin && !shareConfig.hasPin && ' Set a PIN below first.'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={shareConfig.enabled}
+                      disabled={shareSaving || (shareConfig.requirePin && !shareConfig.hasPin && !shareConfig.enabled)}
+                      onClick={() => saveShareConfig({ enabled: !shareConfig.enabled })}
+                      className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                        shareConfig.enabled ? 'bg-primary' : 'bg-gray-300 dark:bg-slate-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                          shareConfig.enabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* 2. Require PIN toggle */}
+                  <div className="flex items-center justify-between p-4 border border-border rounded-2xl">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Lock className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">Require access PIN</p>
+                        <p className="text-sm text-secondary">
+                          {shareConfig.requirePin
+                            ? 'Viewers must enter the PIN to open a shared session.'
+                            : 'Anyone with the link can open the session — no PIN needed.'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={shareConfig.requirePin}
+                      disabled={shareSaving || (!shareConfig.requirePin && !shareConfig.hasPin)}
+                      onClick={() => saveShareConfig({ requirePin: !shareConfig.requirePin })}
+                      title={!shareConfig.requirePin && !shareConfig.hasPin ? 'Set a PIN below first' : undefined}
+                      className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                        shareConfig.requirePin ? 'bg-primary' : 'bg-gray-300 dark:bg-slate-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                          shareConfig.requirePin ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* 3. PIN management */}
+                  <div className={`p-4 border border-border rounded-2xl space-y-4 ${!shareConfig.requirePin ? 'opacity-60' : ''}`}>
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-primary" />
+                      <p className="font-semibold">Access PIN</p>
+                      <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
+                        shareConfig.hasPin ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {shareConfig.hasPin ? 'PIN set' : 'No PIN set'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-secondary">
+                      {!shareConfig.requirePin
+                        ? 'A PIN isn’t required right now. You can still set one so it’s ready if you turn the requirement back on.'
+                        : shareConfig.hasPin
+                          ? 'Enter a new PIN to replace the current one. The existing PIN stays active until you save.'
+                          : 'Set a 4–32 character PIN that viewers must enter to open shared sessions.'}
+                    </p>
+                    <Input
+                      label={shareConfig.hasPin ? 'New PIN' : 'PIN'}
+                      type="password"
+                      value={sharePin}
+                      onChange={(e) => setSharePin(e.target.value)}
+                      placeholder="Enter a PIN (4–32 characters)"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        loading={shareSaving}
+                        disabled={sharePin.trim().length < 4}
+                        onClick={() => saveShareConfig({ pin: sharePin.trim() })}
+                      >
+                        <Save className="w-5 h-5 mr-2" />
+                        {shareConfig.hasPin ? 'Update PIN' : 'Set PIN'}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>

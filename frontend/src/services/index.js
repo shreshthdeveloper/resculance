@@ -494,6 +494,19 @@ export const collaborationService = {
     const response = await api.get('/collaborations/partnerships/my');
     return response;
   },
+
+  // Direct partnership toggle (superadmin partnership manager).
+  // data: { fleetId, hospitalId, active }
+  setPartnership: async (data) => {
+    const response = await api.patch('/collaborations/partnerships/set', data);
+    return response;
+  },
+
+  // Bulk toggle. data: { pairs: [{ fleetId, hospitalId }], active }
+  bulkSetPartnerships: async (data) => {
+    const response = await api.patch('/collaborations/partnerships/bulk', data);
+    return response;
+  },
   // No `delete` method — the backend doesn't expose `DELETE /collaborations/:id`.
   // Cancellation is done via the PATCH /:id/cancel route above, which marks
   // the request `cancelled` (preserving the audit trail). A prior version of
@@ -512,4 +525,27 @@ export const activityService = {
     const response = await api.get('/activities', { params });
     return response;
   }
+};
+
+export const settingsService = {
+  // Public session-sharing config (superadmin only).
+  getPublicShare: async () => {
+    const response = await api.get('/settings/public-share');
+    return response;
+  },
+
+  // Body: { enabled?: boolean, pin?: string }
+  updatePublicShare: async (data) => {
+    const response = await api.put('/settings/public-share', data);
+    return response;
+  },
+};
+
+export const publicSessionService = {
+  // PIN-gated read-only session fetch. Uses the shared `api` instance; when no
+  // user is logged in there's simply no Authorization header attached.
+  getSession: async (sessionId, pin) => {
+    const response = await api.post(`/public/sessions/${sessionId}`, { pin });
+    return response;
+  },
 };
