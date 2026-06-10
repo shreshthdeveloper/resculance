@@ -31,10 +31,10 @@ export const formatSessionDate = (dateString) => {
 
 export const SessionStatusBadge = ({ status }) => {
   const statusConfig = {
-    onboarded: { color: 'bg-blue-100 text-blue-800', icon: Activity, label: 'Onboarded' },
-    in_transit: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'In Transit' },
-    offboarded: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Offboarded' },
-    cancelled: { color: 'bg-red-100 text-red-800', icon: XCircle, label: 'Cancelled' },
+    onboarded: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200', icon: Activity, label: 'Onboarded' },
+    in_transit: { color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200', icon: Clock, label: 'In Transit' },
+    offboarded: { color: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200', icon: CheckCircle, label: 'Offboarded' },
+    cancelled: { color: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200', icon: XCircle, label: 'Cancelled' },
   };
   const config = statusConfig[status?.toLowerCase()] || statusConfig.onboarded;
   const Icon = config.icon;
@@ -76,11 +76,11 @@ export default function SessionDetailView({ session, metadata }) {
         {/* Patient Information */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-              <User className="w-6 h-6 text-blue-600" />
+            <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+              <User className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Patient Information</h2>
+              <h2 className="text-lg font-bold text-text">Patient Information</h2>
               <p className="text-xs text-secondary">Snapshot at session time</p>
             </div>
           </div>
@@ -106,11 +106,11 @@ export default function SessionDetailView({ session, metadata }) {
         {/* Ambulance & Crew */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-              <AmbulanceIcon className="w-6 h-6 text-red-600" />
+            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+              <AmbulanceIcon className="w-6 h-6 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Ambulance & Crew</h2>
+              <h2 className="text-lg font-bold text-text">Ambulance & Crew</h2>
               <p className="text-xs text-secondary">Vehicle and personnel details</p>
             </div>
           </div>
@@ -132,7 +132,7 @@ export default function SessionDetailView({ session, metadata }) {
 
               {metadata.crew && (
                 <div>
-                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <h3 className="font-semibold text-sm text-text mb-3 flex items-center gap-2">
                     <Users className="w-4 h-4" />
                     Crew Members
                   </h3>
@@ -141,7 +141,7 @@ export default function SessionDetailView({ session, metadata }) {
                     <div className="mb-3">
                       <p className="text-xs text-secondary mb-2">Doctors</p>
                       {metadata.crew.doctors.map((doc) => (
-                        <div key={doc.id} className="text-sm px-3 py-1.5 bg-blue-50 rounded-lg mb-1">
+                        <div key={doc.id} className="text-sm px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-900 dark:text-blue-200 rounded-lg mb-1">
                           {doc.first_name} {doc.last_name}
                         </div>
                       ))}
@@ -152,7 +152,7 @@ export default function SessionDetailView({ session, metadata }) {
                     <div className="mb-3">
                       <p className="text-xs text-secondary mb-2">Paramedics</p>
                       {metadata.crew.paramedics.map((para) => (
-                        <div key={para.id} className="text-sm px-3 py-1.5 bg-green-50 rounded-lg mb-1">
+                        <div key={para.id} className="text-sm px-3 py-1.5 bg-green-50 dark:bg-green-900/20 text-green-900 dark:text-green-200 rounded-lg mb-1">
                           {para.first_name} {para.last_name}
                         </div>
                       ))}
@@ -163,7 +163,7 @@ export default function SessionDetailView({ session, metadata }) {
                     <div className="mb-3">
                       <p className="text-xs text-secondary mb-2">Drivers</p>
                       {metadata.crew.drivers.map((driver) => (
-                        <div key={driver.id} className="text-sm px-3 py-1.5 bg-purple-50 rounded-lg mb-1">
+                        <div key={driver.id} className="text-sm px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-900 dark:text-purple-200 rounded-lg mb-1">
                           {driver.first_name} {driver.last_name}
                         </div>
                       ))}
@@ -178,11 +178,11 @@ export default function SessionDetailView({ session, metadata }) {
         {/* Timeline & Organizations */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
-              <Clock className="w-6 h-6 text-purple-600" />
+            <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+              <Clock className="w-6 h-6 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Timeline</h2>
+              <h2 className="text-lg font-bold text-text">Timeline</h2>
               <p className="text-xs text-secondary">Session chronology</p>
             </div>
           </div>
@@ -209,19 +209,19 @@ export default function SessionDetailView({ session, metadata }) {
           <div className="pt-4 border-t border-border">
             <div className="flex items-center gap-3 mb-4">
               <Building2 className="w-5 h-5 text-primary" />
-              <h3 className="font-semibold text-sm">Organizations</h3>
+              <h3 className="font-semibold text-sm text-text">Organizations</h3>
             </div>
             {metadata?.organizations ? (
               <div className="space-y-3">
-                <div className="p-3 bg-blue-50 rounded-lg">
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                   <p className="text-xs text-secondary mb-1">Session Owner</p>
-                  <p className="text-sm font-medium">{metadata.organizations.session_owner.name}</p>
+                  <p className="text-sm font-medium text-text">{metadata.organizations.session_owner.name}</p>
                   <p className="text-xs text-secondary capitalize">{metadata.organizations.session_owner.type}</p>
                 </div>
                 {metadata.organizations.destination_hospital && (
-                  <div className="p-3 bg-green-50 rounded-lg">
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
                     <p className="text-xs text-secondary mb-1">Destination Hospital</p>
-                    <p className="text-sm font-medium">{metadata.organizations.destination_hospital.name}</p>
+                    <p className="text-sm font-medium text-text">{metadata.organizations.destination_hospital.name}</p>
                   </div>
                 )}
               </div>
@@ -237,47 +237,47 @@ export default function SessionDetailView({ session, metadata }) {
         {/* Locations */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-              <MapPin className="w-6 h-6 text-green-600" />
+            <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+              <MapPin className="w-6 h-6 text-green-600 dark:text-green-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Locations</h2>
+              <h2 className="text-lg font-bold text-text">Locations</h2>
               <p className="text-xs text-secondary">Pickup & destination details</p>
             </div>
           </div>
 
           {metadata?.locations ? (
             <div className="space-y-4">
-              <div className="p-4 bg-blue-50 rounded-lg">
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
-                  <Navigation className="w-4 h-4 text-blue-600" />
-                  <p className="text-sm font-semibold text-blue-900">Pickup Location</p>
+                  <Navigation className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">Pickup Location</p>
                 </div>
-                <p className="text-sm text-blue-800">{metadata.locations.pickup.address || 'N/A'}</p>
+                <p className="text-sm text-blue-800 dark:text-blue-300">{metadata.locations.pickup.address || 'N/A'}</p>
                 {metadata.locations.pickup.latitude && metadata.locations.pickup.longitude && (
-                  <p className="text-xs text-blue-600 mt-1">
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
                     {metadata.locations.pickup.latitude}, {metadata.locations.pickup.longitude}
                   </p>
                 )}
               </div>
 
-              <div className="p-4 bg-green-50 rounded-lg">
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
-                  <MapPin className="w-4 h-4 text-green-600" />
-                  <p className="text-sm font-semibold text-green-900">Destination</p>
+                  <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
+                  <p className="text-sm font-semibold text-green-900 dark:text-green-200">Destination</p>
                 </div>
-                <p className="text-sm text-green-800">{metadata.locations.destination.address || 'N/A'}</p>
+                <p className="text-sm text-green-800 dark:text-green-300">{metadata.locations.destination.address || 'N/A'}</p>
                 {metadata.locations.destination.latitude && metadata.locations.destination.longitude && (
-                  <p className="text-xs text-green-600 mt-1">
+                  <p className="text-xs text-green-600 dark:text-green-400 mt-1">
                     {metadata.locations.destination.latitude}, {metadata.locations.destination.longitude}
                   </p>
                 )}
               </div>
 
               {metadata.locations.distance_km && (
-                <div className="p-3 bg-purple-50 rounded-lg text-center">
+                <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-center">
                   <p className="text-sm text-secondary mb-1">Total Distance</p>
-                  <p className="text-2xl font-bold text-purple-900">{metadata.locations.distance_km} km</p>
+                  <p className="text-2xl font-bold text-purple-900 dark:text-purple-200">{metadata.locations.distance_km} km</p>
                 </div>
               )}
             </div>
@@ -289,11 +289,11 @@ export default function SessionDetailView({ session, metadata }) {
         {/* Medical Information */}
         <Card className="p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-              <Heart className="w-6 h-6 text-red-600" />
+            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+              <Heart className="w-6 h-6 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Medical Information</h2>
+              <h2 className="text-lg font-bold text-text">Medical Information</h2>
               <p className="text-xs text-secondary">Assessment & treatment details</p>
             </div>
           </div>
@@ -319,33 +319,33 @@ export default function SessionDetailView({ session, metadata }) {
       {/* Audit Trail */}
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center">
-            <Shield className="w-6 h-6 text-yellow-600" />
+          <div className="w-12 h-12 rounded-full bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
+            <Shield className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
           </div>
           <div>
-            <h2 className="text-lg font-bold">Audit Trail</h2>
+            <h2 className="text-lg font-bold text-text">Audit Trail</h2>
             <p className="text-xs text-secondary">User actions and system timestamps</p>
           </div>
         </div>
 
         {metadata?.users ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm font-semibold text-blue-900 mb-3">Onboarded By</p>
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-3">Onboarded By</p>
               <div className="space-y-2">
-                <p className="text-sm"><span className="text-secondary">Name:</span> <span className="font-medium">{metadata.users.onboarded_by.name}</span></p>
-                <p className="text-sm"><span className="text-secondary">Email:</span> <span className="font-medium">{metadata.users.onboarded_by.email}</span></p>
-                <p className="text-sm"><span className="text-secondary">Role:</span> <span className="font-medium capitalize">{metadata.users.onboarded_by.role}</span></p>
+                <p className="text-sm text-text"><span className="text-secondary">Name:</span> <span className="font-medium">{metadata.users.onboarded_by.name}</span></p>
+                <p className="text-sm text-text"><span className="text-secondary">Email:</span> <span className="font-medium">{metadata.users.onboarded_by.email}</span></p>
+                <p className="text-sm text-text"><span className="text-secondary">Role:</span> <span className="font-medium capitalize">{metadata.users.onboarded_by.role}</span></p>
               </div>
             </div>
 
             {metadata.users.offboarded_by && (
-              <div className="p-4 bg-green-50 rounded-lg">
-                <p className="text-sm font-semibold text-green-900 mb-3">Offboarded By</p>
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <p className="text-sm font-semibold text-green-900 dark:text-green-200 mb-3">Offboarded By</p>
                 <div className="space-y-2">
-                  <p className="text-sm"><span className="text-secondary">Name:</span> <span className="font-medium">{metadata.users.offboarded_by.name}</span></p>
-                  <p className="text-sm"><span className="text-secondary">Email:</span> <span className="font-medium">{metadata.users.offboarded_by.email}</span></p>
-                  <p className="text-sm"><span className="text-secondary">Role:</span> <span className="font-medium capitalize">{metadata.users.offboarded_by.role}</span></p>
+                  <p className="text-sm text-text"><span className="text-secondary">Name:</span> <span className="font-medium">{metadata.users.offboarded_by.name}</span></p>
+                  <p className="text-sm text-text"><span className="text-secondary">Email:</span> <span className="font-medium">{metadata.users.offboarded_by.email}</span></p>
+                  <p className="text-sm text-text"><span className="text-secondary">Role:</span> <span className="font-medium capitalize">{metadata.users.offboarded_by.role}</span></p>
                 </div>
               </div>
             )}
@@ -359,19 +359,19 @@ export default function SessionDetailView({ session, metadata }) {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <p className="text-xs text-secondary mb-1">Created</p>
-                <p className="text-sm font-medium">{formatDate(metadata.audit.created_at)}</p>
+                <p className="text-sm font-medium text-text">{formatDate(metadata.audit.created_at)}</p>
               </div>
               <div>
                 <p className="text-xs text-secondary mb-1">Updated</p>
-                <p className="text-sm font-medium">{formatDate(metadata.audit.updated_at)}</p>
+                <p className="text-sm font-medium text-text">{formatDate(metadata.audit.updated_at)}</p>
               </div>
               <div>
                 <p className="text-xs text-secondary mb-1">Offboarded</p>
-                <p className="text-sm font-medium">{formatDate(metadata.audit.offboarded_at)}</p>
+                <p className="text-sm font-medium text-text">{formatDate(metadata.audit.offboarded_at)}</p>
               </div>
               <div>
                 <p className="text-xs text-secondary mb-1">Metadata Captured</p>
-                <p className="text-sm font-medium">{formatDate(metadata.audit.metadata_captured_at)}</p>
+                <p className="text-sm font-medium text-text">{formatDate(metadata.audit.metadata_captured_at)}</p>
               </div>
             </div>
           </div>
@@ -381,7 +381,7 @@ export default function SessionDetailView({ session, metadata }) {
       {/* Session Data - Notes, Medications, Files */}
       {metadata?.session_data && (metadata.session_data.notes?.length > 0 || metadata.session_data.medications?.length > 0 || metadata.session_data.files?.length > 0) && (
         <Card className="p-6">
-          <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+          <h2 className="text-xl font-bold text-text mb-6 flex items-center gap-2">
             <FileText className="w-6 h-6 text-primary" />
             Session Data
             <span className="text-sm font-normal text-secondary ml-2">
@@ -397,7 +397,7 @@ export default function SessionDetailView({ session, metadata }) {
                   <FileText className="w-4 h-4" />
                   Notes
                 </h3>
-                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 px-2 py-1 rounded-full">
                   {metadata.session_data.counts?.notes || 0}
                 </span>
               </div>
@@ -405,7 +405,7 @@ export default function SessionDetailView({ session, metadata }) {
               {metadata.session_data.notes?.length > 0 ? (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {metadata.session_data.notes.map((note, idx) => (
-                    <div key={idx} className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                    <div key={idx} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-900/40">
                       <p className="text-sm text-text mb-2">{note.content.text}</p>
                       <div className="text-xs text-secondary">
                         <p className="font-medium">{note.addedBy.name}</p>
@@ -427,7 +427,7 @@ export default function SessionDetailView({ session, metadata }) {
                   <Pill className="w-4 h-4" />
                   Medications
                 </h3>
-                <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                <span className="text-xs bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200 px-2 py-1 rounded-full">
                   {metadata.session_data.counts?.medications || 0}
                 </span>
               </div>
@@ -435,7 +435,7 @@ export default function SessionDetailView({ session, metadata }) {
               {metadata.session_data.medications?.length > 0 ? (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {metadata.session_data.medications.map((med, idx) => (
-                    <div key={idx} className="p-3 bg-green-50 rounded-lg border border-green-100">
+                    <div key={idx} className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-100 dark:border-green-900/40">
                       <p className="font-medium text-text">{med.content.name}</p>
                       <p className="text-sm text-secondary mb-2">
                         {med.content.dosage} • {med.content.route}
@@ -460,7 +460,7 @@ export default function SessionDetailView({ session, metadata }) {
                   <FileText className="w-4 h-4" />
                   Files
                 </h3>
-                <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
+                <span className="text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 px-2 py-1 rounded-full">
                   {metadata.session_data.counts?.files || 0}
                 </span>
               </div>
@@ -468,9 +468,9 @@ export default function SessionDetailView({ session, metadata }) {
               {metadata.session_data.files?.length > 0 ? (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {metadata.session_data.files.map((file, idx) => (
-                    <div key={idx} className="p-3 bg-purple-50 rounded-lg border border-purple-100">
+                    <div key={idx} className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-900/40">
                       <div className="flex items-start gap-2 mb-2">
-                        <svg className="w-5 h-5 flex-shrink-0 text-purple-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-5 h-5 flex-shrink-0 text-purple-600 dark:text-purple-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <div className="flex-1 min-w-0">
