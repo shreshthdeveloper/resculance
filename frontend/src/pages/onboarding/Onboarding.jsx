@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import useWithGlobalLoader from '../../hooks/useWithGlobalLoader';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -35,6 +35,10 @@ export const Onboarding = () => {
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [selectedAmbulance, setSelectedAmbulance] = useState(null);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  // Full option object for the selected patient so its label survives even when
+  // it isn't part of the currently loaded async search results.
+  const [selectedPatientOption, setSelectedPatientOption] = useState(null);
+  const patientSearchTimer = useRef(null);
   const [inlineNewPatientMode, setInlineNewPatientMode] = useState(false);
   const [inlineNewPatientName, setInlineNewPatientName] = useState('');
   const [inlineSaving, setInlineSaving] = useState(false);
@@ -429,6 +433,52 @@ export const Onboarding = () => {
     }
   };
 
+  const toPatientOption = (p) => {
+    const name = `${p.firstName || p.first_name || ''} ${p.lastName || p.last_name || ''}`.trim();
+    const code = p.patientCode || p.patient_code || null;
+    const phone = p.phone || p.contact_phone || null;
+    const age = p.age != null ? `${p.age}y` : null;
+    const gender = p.gender || null;
+    return {
+      value: p.id,
+      // `label` is what react-select matches against / shows in the input box.
+      // Include code + phone so two patients with the same name are searchable
+      // and distinguishable once selected.
+      label: [name, code, phone].filter(Boolean).join(' • '),
+      name,
+      code,
+      phone,
+      meta: [age, gender].filter(Boolean).join(' / '),
+    };
+  };
+
+  // Server-side patient search for the onboard dropdown. Debounced so we hit
+  // the backend at most once per pause in typing. Only ever returns patients
+  // that are available for onboarding (the /available endpoint filters those).
+  const loadPatientOptions = (inputValue) =>
+    new Promise((resolve) => {
+      if (patientSearchTimer.current) clearTimeout(patientSearchTimer.current);
+      patientSearchTimer.current = setTimeout(async () => {
+        try {
+          const params = { limit: 25 };
+          const q = (inputValue || '').trim();
+          if (q) params.search = q;
+          if (user?.role === 'superadmin') {
+            if (!selectedOrgId) return resolve([]);
+            params.organizationId = selectedOrgId;
+          } else {
+            params.organizationId = user?.organizationId;
+          }
+          const resp = await patientService.getAvailable(params);
+          const data = resp.data?.data?.patients || resp.data?.patients || resp.data || [];
+          resolve(data.map(toPatientOption));
+        } catch (e) {
+          console.error('Failed to search patients:', e);
+          resolve([]);
+        }
+      }, 350);
+    });
+
   const handleOpenPatientModal = (ambulance) => {
     // **SECURITY CHECK**: Prevent opening modal for ambulances that are inactive, already active or have an active onboarding
     if (ambulance?.status === 'inactive') {
@@ -441,7 +491,8 @@ export const Onboarding = () => {
     }
     setSelectedAmbulance(ambulance);
     setSelectedPatient(null);
-    
+    setSelectedPatientOption(null);
+
     // Auto-set destination hospital for hospital context
     if (isHospitalContext) {
       const hospitalId = user?.role === 'superadmin' ? selectedOrgId : user?.organizationId;
@@ -457,6 +508,7 @@ export const Onboarding = () => {
     setShowPatientModal(false);
     setSelectedAmbulance(null);
     setSelectedPatient(null);
+    setSelectedPatientOption(null);
     setDestinationHospitalId('');
   };
 
@@ -913,18 +965,29 @@ export const Onboarding = () => {
             <div>
               <div>
                 <Select
-                  placeholder="Select a patient to onboard"
-                  options={availablePatients.map(p => ({
-                    value: p.id,
-                    label: `${p.firstName || p.first_name} ${p.lastName || p.last_name} - ${p.phone}`
-                  }))}
-                  value={selectedPatient ? {
-                    value: selectedPatient,
-                    label: availablePatients.find(p => p.id === selectedPatient)
-                      ? `${availablePatients.find(p => p.id === selectedPatient)?.firstName || availablePatients.find(p => p.id === selectedPatient)?.first_name} ${availablePatients.find(p => p.id === selectedPatient)?.lastName || availablePatients.find(p => p.id === selectedPatient)?.last_name}`
-                      : ''
-                  } : null}
-                  onChange={(opt) => setSelectedPatient(opt?.value || null)}
+                  placeholder="Search by name, code or phone…"
+                  loadOptions={loadPatientOptions}
+                  defaultOptions={availablePatients.map(toPatientOption)}
+                  cacheOptions={false}
+                  filterOption={null}
+                  noOptionsMessage={({ inputValue }) =>
+                    inputValue ? 'No matching available patients' : 'No available patients'}
+                  loadingMessage={() => 'Searching…'}
+                  value={selectedPatientOption}
+                  onChange={(opt) => {
+                    setSelectedPatientOption(opt || null);
+                    setSelectedPatient(opt?.value || null);
+                  }}
+                  formatOptionLabel={(opt, { context }) => {
+                    if (context !== 'menu') return opt.label || opt.name;
+                    const sub = [opt.code, opt.phone, opt.meta].filter(Boolean).join(' • ');
+                    return (
+                      <div className="flex flex-col leading-tight">
+                        <span className="font-medium">{opt.name || opt.label}</span>
+                        {sub && <span className="text-xs text-secondary">{sub}</span>}
+                      </div>
+                    );
+                  }}
                   classNamePrefix="react-select"
                   isDisabled={inlineNewPatientMode}
                 />
@@ -932,7 +995,7 @@ export const Onboarding = () => {
 
               <div className="mt-3">
                 {!inlineNewPatientMode ? (
-                  <Button size="sm" variant="outline" onClick={() => { setInlineNewPatientMode(true); setInlineNewPatientName(''); setSelectedPatient(null); }}>
+                  <Button size="sm" variant="outline" onClick={() => { setInlineNewPatientMode(true); setInlineNewPatientName(''); setSelectedPatient(null); setSelectedPatientOption(null); }}>
                     New Patient
                   </Button>
                 ) : (
@@ -974,6 +1037,7 @@ export const Onboarding = () => {
                           const createdId = created?.id || created?.ID || created?.insertId || resp.data?.data?.patientId || null;
                           await fetchPatients();
                           setSelectedPatient(createdId || null);
+                          setSelectedPatientOption(createdId ? { value: createdId, label: name } : null);
                           setInlineNewPatientMode(false);
                           setInlineNewPatientName('');
                           toast.success('Patient created');

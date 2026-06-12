@@ -237,7 +237,7 @@ export const GPSLocationModal = ({ isOpen, onClose, session, ambulance }) => {
                 onClick={() => setAutoRefresh(!autoRefresh)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${
                   autoRefresh 
-                    ? 'bg-emerald-500 text-white' 
+                    ? 'bg-success text-white'
                     : 'bg-white/20 text-white hover:bg-white/30'
                 }`}
               >

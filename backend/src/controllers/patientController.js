@@ -411,47 +411,122 @@ class PatientController {
     }
   }
 
+  // Patient list with server-side tab filtering, search, pagination and
+  // per-tab counts. Tabs are derived from the patient's *latest* session
+  // status (joined in via aggregation) so the filtering/pagination/counts
+  // are all computed in the database rather than on a single client page:
+  //   - new        : patient has never had a session
+  //   - onboarded  : latest session is active / onboarded / in_transit
+  //   - offboarded : latest session is offboarded
+  //   - inactive   : patient deactivated (is_active === false)
+  //   - all        : every *active* patient (new + onboarded + offboarded)
   static async getAll(req, res, next) {
     try {
+      const mongoose = require('mongoose');
       const search = req.query.search;
       const limit = parseInt(req.query.limit, 10) || 50;
       const offset = parseInt(req.query.offset, 10) || 0;
+      const status = (req.query.status || 'all').toString().toLowerCase();
+      // Legacy flag: older callers used includeInactive=true to mean "everything".
       const includeInactive = ['true', '1', 1, true].includes(req.query.includeInactive);
 
-      const filter = {};
-      if (!includeInactive) filter.is_active = true;
+      const baseMatch = {};
       if (req.user.role === 'superadmin') {
-        if (req.query.organizationId) filter.organization_id = req.query.organizationId;
-      } else {
-        filter.organization_id = req.user.organizationId;
+        if (req.query.organizationId && isValidId(req.query.organizationId)) {
+          baseMatch.organization_id = new mongoose.Types.ObjectId(req.query.organizationId);
+        }
+      } else if (isValidId(req.user.organizationId)) {
+        baseMatch.organization_id = new mongoose.Types.ObjectId(req.user.organizationId);
       }
       if (search) {
         const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-        filter.$or = [{ first_name: re }, { last_name: re }, { patient_code: re }];
+        baseMatch.$or = [{ first_name: re }, { last_name: re }, { patient_code: re }];
       }
 
-      const [docs, total] = await Promise.all([
-        Patient.find(filter).sort({ created_at: -1 }).skip(offset).limit(limit).lean(),
-        Patient.countDocuments(filter)
+      // Stages shared by both the count facet and the data facet: join the
+      // latest session and derive a single `tabStatus` per patient.
+      const computeStages = [
+        {
+          $lookup: {
+            from: 'patient_sessions',
+            let: { pid: '$_id' },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$patient_id', '$$pid'] } } },
+              { $sort: { created_at: -1 } },
+              { $limit: 1 },
+              { $project: { status: 1 } }
+            ],
+            as: '_latestSession'
+          }
+        },
+        {
+          $addFields: {
+            latestSessionStatus: { $ifNull: [{ $arrayElemAt: ['$_latestSession.status', 0] }, null] }
+          }
+        },
+        {
+          $addFields: {
+            tabStatus: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$is_active', false] }, then: 'inactive' },
+                  { case: { $eq: ['$latestSessionStatus', null] }, then: 'new' },
+                  { case: { $in: ['$latestSessionStatus', ACTIVE_SESSION_STATUSES.concat('active')] }, then: 'onboarded' },
+                  { case: { $eq: ['$latestSessionStatus', 'offboarded'] }, then: 'offboarded' }
+                ],
+                default: 'new'
+              }
+            }
+          }
+        },
+        { $project: { _latestSession: 0 } }
+      ];
+
+      // Which tabStatus values the requested tab includes.
+      let tabMatch;
+      if (status === 'inactive') tabMatch = { tabStatus: 'inactive' };
+      else if (status === 'new') tabMatch = { tabStatus: 'new' };
+      else if (status === 'onboarded') tabMatch = { tabStatus: 'onboarded' };
+      else if (status === 'offboarded') tabMatch = { tabStatus: 'offboarded' };
+      else if (includeInactive) tabMatch = {}; // legacy "everything"
+      else tabMatch = { tabStatus: { $in: ['new', 'onboarded', 'offboarded'] } }; // 'all' => active patients
+
+      const result = await Patient.aggregate([
+        { $match: baseMatch },
+        ...computeStages,
+        {
+          $facet: {
+            counts: [{ $group: { _id: '$tabStatus', count: { $sum: 1 } } }],
+            totalForTab: [{ $match: tabMatch }, { $count: 'count' }],
+            data: [
+              { $match: tabMatch },
+              { $sort: { created_at: -1 } },
+              { $skip: offset },
+              { $limit: limit }
+            ]
+          }
+        }
       ]);
 
-      // Attach latest session status
-      const ids = docs.map((p) => p._id);
-      const latestSessions = await PatientSession.aggregate([
-        { $match: { patient_id: { $in: ids } } },
-        { $sort: { created_at: -1 } },
-        { $group: { _id: '$patient_id', status: { $first: '$status' } } }
-      ]);
-      const sessionMap = new Map(latestSessions.map((s) => [String(s._id), s.status]));
+      const facet = result[0] || {};
+      const docs = facet.data || [];
+      const total = facet.totalForTab?.[0]?.count || 0;
+
+      const counts = { new: 0, onboarded: 0, offboarded: 0, inactive: 0 };
+      (facet.counts || []).forEach((c) => { if (c._id in counts) counts[c._id] = c.count; });
+      counts.all = counts.new + counts.onboarded + counts.offboarded;
+      counts.total = counts.all + counts.inactive;
 
       const mapped = docs.map((p) => {
         const mp = mapPatient(p);
-        mp.latestSessionStatus = sessionMap.get(String(p._id)) || null;
+        mp.latestSessionStatus = p.latestSessionStatus || null;
+        mp.tabStatus = p.tabStatus;
         return mp;
       });
 
       return success(res, 'OK', {
         patients: mapped,
+        counts,
         pagination: { total, limit, offset, hasMore: offset + docs.length < total }
       });
     } catch (err) {
@@ -493,13 +568,20 @@ class PatientController {
         filter.$or = [{ first_name: re }, { last_name: re }, { patient_code: re }];
       }
 
-      const docs = await Patient.find(filter)
-        .sort({ created_at: -1 })
-        .skip(offset)
-        .limit(limit)
-        .lean();
+      const [docs, total] = await Promise.all([
+        Patient.find(filter)
+          .sort({ created_at: -1 })
+          .skip(offset)
+          .limit(limit)
+          .lean(),
+        Patient.countDocuments(filter)
+      ]);
 
-      return success(res, 'OK', { patients: docs.map(mapPatient), count: docs.length });
+      return success(res, 'OK', {
+        patients: docs.map(mapPatient),
+        count: docs.length,
+        pagination: { total, limit, offset, hasMore: offset + docs.length < total }
+      });
     } catch (err) {
       next(err);
     }

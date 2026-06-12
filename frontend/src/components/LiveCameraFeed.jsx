@@ -135,7 +135,7 @@ export const LiveCameraFeed = ({
           <p className="text-gray-400 text-sm mb-4">{error}</p>
           <button
             onClick={fetchAndAuthenticateCamera}
-            className="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition"
+            className="mt-4 px-4 py-2 bg-primary text-white rounded-2xl hover:opacity-90 transition"
           >
             Retry
           </button>

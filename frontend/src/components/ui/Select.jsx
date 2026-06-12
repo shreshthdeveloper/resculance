@@ -1,9 +1,13 @@
 import React from 'react';
 import ReactSelect from 'react-select';
+import AsyncReactSelect from 'react-select/async';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const Select = (props) => {
   const { isDark } = useTheme();
+  // When `loadOptions` is supplied, render the async (server-side searchable)
+  // variant so large datasets don't have to be loaded into the dropdown up front.
+  const SelectComponent = props.loadOptions ? AsyncReactSelect : ReactSelect;
 
   const defaultStyles = {
     menuPortal: (base) => ({ ...base, zIndex: 30000 }),
@@ -41,7 +45,7 @@ const Select = (props) => {
   }, {});
 
   return (
-    <ReactSelect
+    <SelectComponent
       {...props}
       isSearchable={props.isSearchable !== false}
       menuPortalTarget={typeof document !== 'undefined' ? document.body : null}

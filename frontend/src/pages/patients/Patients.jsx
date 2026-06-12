@@ -52,12 +52,15 @@ const patientSchema = yup.object({
   emergencyContactRelation: yup.string().nullable(),
 });
 
+const PAGE_SIZE = 20;
+const EMPTY_COUNTS = { new: 0, onboarded: 0, offboarded: 0, inactive: 0, all: 0, total: 0 };
+
 export const Patients = () => {
   const [patients, setPatients] = useState([]);
-  const [selectedTab, setSelectedTab] = useState('new');
-  const [activePatientIds, setActivePatientIds] = useState(new Set());
-  const [offboardedPatientIds, setOffboardedPatientIds] = useState(new Set());
-  const [patientsCache, setPatientsCache] = useState({});
+  const [selectedTab, setSelectedTab] = useState('all');
+  const [counts, setCounts] = useState(EMPTY_COUNTS);
+  const [pagination, setPagination] = useState({ total: 0, limit: PAGE_SIZE, offset: 0, hasMore: false });
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -102,43 +105,33 @@ export const Patients = () => {
     fetchOrganizations();
   }, []);
 
+  // Main fetch: re-runs when scope, tab or page changes. Search is handled by
+  // the debounced effect below so we don't fire a request per keystroke.
   useEffect(() => {
-    // Only fetch patients when scope (selectedOrgId/user) changes. Do NOT refetch on every tab change.
     const doFetch = async () => {
-      // clear current patients while loading to avoid stale data
-      setPatients([]);
-      await runWithLoader(async () => {
-        if (user?.role === 'superadmin') {
-          if (selectedOrgId) {
-            await fetchPatients();
-          }
-        } else {
-          await fetchPatients();
-        }
-      }, 'Loading patients...');
-    };
-
-    doFetch().catch((err) => {
-      // error already handled in fetchPatients but ensure loader hidden
-      console.error('Error fetching patients with loader', err);
-    });
-  }, [selectedOrgId, user]);
-
-  // When user switches to inactive tab, fetch inclusive dataset if not cached
-  useEffect(() => {
-    if (selectedTab === 'inactive') {
-      const scopeKey = user?.role === 'superadmin' ? `org:${selectedOrgId || 'none'}` : `org:${user?.organizationId || 'own'}`;
-      const cached = patientsCache[scopeKey] || {};
-      if (!cached.all) {
-        runWithLoader(async () => {
-          await fetchPatients(false, true);
-        }, 'Loading inactive patients...').catch(err => console.error(err));
-      } else {
-        // ensure UI shows cached all
-        setPatients(cached.all);
+      if (user?.role === 'superadmin' && !selectedOrgId) {
+        setPatients([]);
+        setCounts(EMPTY_COUNTS);
+        setPagination({ total: 0, limit: PAGE_SIZE, offset: 0, hasMore: false });
+        return;
       }
-    }
-  }, [selectedTab, selectedOrgId, user]);
+      await runWithLoader(() => fetchPatients(), 'Loading patients...');
+    };
+    doFetch().catch((err) => console.error('Error fetching patients with loader', err));
+  }, [selectedOrgId, user, selectedTab, page]);
+
+  // Debounced server-side search. Reset to page 1 when the query changes so we
+  // don't land on an out-of-range page for the filtered result set.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (page === 1) {
+        if (!(user?.role === 'superadmin' && !selectedOrgId)) fetchPatients();
+      } else {
+        setPage(1);
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const fetchOrganizations = async () => {
     try {
@@ -166,51 +159,31 @@ export const Patients = () => {
     return () => window.removeEventListener('global:cache-reset', handler);
   }, []);
 
-  const fetchPatients = async (force = false, includeInactive = false) => {
+  const fetchPatients = async () => {
     try {
       setLoading(true);
 
-      const scopeKey = user?.role === 'superadmin' ? `org:${selectedOrgId || 'none'}` : `org:${user?.organizationId || 'own'}`;
-      const cached = patientsCache[scopeKey] || {};
-
-      // If not forcing and we have cached data use it
-      if (!force) {
-        if (includeInactive && cached.all) {
-          setPatients(cached.all);
-          computeSessionSetsFromPatients(cached.all);
-          setLoading(false);
-          return;
-        }
-        if (!includeInactive && cached.active) {
-          setPatients(cached.active);
-          computeSessionSetsFromPatients(cached.active);
-          setLoading(false);
-          return;
-        }
+      if (user?.role === 'superadmin' && !selectedOrgId) {
+        setPatients([]);
+        setCounts(EMPTY_COUNTS);
+        setPagination({ total: 0, limit: PAGE_SIZE, offset: 0, hasMore: false });
+        return;
       }
 
-      const params = {};
+      const params = {
+        status: selectedTab,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      };
+      const q = searchQuery.trim();
+      if (q) params.search = q;
       if (user?.role === 'superadmin' && selectedOrgId) params.organizationId = selectedOrgId;
-      if (includeInactive) params.includeInactive = true;
 
       const response = await patientService.getAll(params);
-      const fetched = response.data?.data?.patients || response.data?.patients || response.data || [];
-
-      setPatientsCache(prev => {
-        const next = { ...prev };
-        next[scopeKey] = next[scopeKey] || {};
-        if (includeInactive) {
-          next[scopeKey].all = fetched;
-    next[scopeKey].active = fetched.filter(p => !(Number(p.is_active) === 0 || Number(p.isActive) === 0));
-        } else {
-          next[scopeKey].active = fetched;
-        }
-        next[scopeKey].ts = Date.now();
-        return next;
-      });
-
-      setPatients(fetched);
-      computeSessionSetsFromPatients(fetched);
+      const data = response.data?.data || response.data || {};
+      setPatients(data.patients || []);
+      if (data.counts) setCounts({ ...EMPTY_COUNTS, ...data.counts });
+      setPagination(data.pagination || { total: 0, limit: PAGE_SIZE, offset: 0, hasMore: false });
     } catch (error) {
       console.error('Failed to fetch patients:', error);
       const msg = getErrorMessage(error, 'Failed to load patients');
@@ -218,23 +191,6 @@ export const Patients = () => {
       setPatients([]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const computeSessionSetsFromPatients = (fetched) => {
-    try {
-      const activeSet = new Set();
-      const offSet = new Set();
-      fetched.forEach(p => {
-        const status = (p.latestSessionStatus || '').toLowerCase();
-        if (['active', 'onboarded', 'in_transit'].includes(status)) activeSet.add(p.id);
-        if (status === 'offboarded') offSet.add(p.id);
-      });
-      setActivePatientIds(activeSet);
-      setOffboardedPatientIds(offSet);
-    } catch (e) {
-      setActivePatientIds(new Set());
-      setOffboardedPatientIds(new Set());
     }
   };
 
@@ -317,7 +273,8 @@ export const Patients = () => {
         await patientService.create(data);
         toast.success('Patient created successfully');
       }
-      await fetchPatients(true);
+      if (page !== 1) setPage(1);
+      else await fetchPatients();
       handleCloseModal();
     } catch (error) {
       console.error('Failed to save patient:', error);
@@ -350,7 +307,7 @@ export const Patients = () => {
       try {
         await patientService.delete(id);
         toast.success('Patient deactivated successfully');
-        await fetchPatients(true);
+        await fetchPatients();
       } catch (error) {
         console.error('Failed to deactivate patient:', error);
   const msg = getErrorMessage(error, 'Failed to deactivate patient');
@@ -388,50 +345,7 @@ export const Patients = () => {
     setModalOrgTypeFilter('');
   };
 
-  const filteredPatients = patients.filter((patient) => {
-    const searchLower = searchQuery.toLowerCase();
-    return (
-      patient.firstName?.toLowerCase().includes(searchLower) ||
-      patient.lastName?.toLowerCase().includes(searchLower) ||
-      patient.phone?.includes(searchQuery) ||
-      patient.email?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  // Tab filtering
-  const tabFilteredPatients = (() => {
-    // Rules:
-    // - new: patients that haven't onboarded yet (no sessions / no latestSessionStatus)
-    // - onboarded: patients currently onboarded (statuses like active, onboarded, in_transit)
-    // - offboarded: patients whose latest session status is offboarded
-    // - inactive: patients with is_active === false
-
-    if (selectedTab === 'new') {
-      return filteredPatients.filter(p => !p.latestSessionStatus);
-    }
-
-    if (selectedTab === 'onboarded') {
-      return filteredPatients.filter(p => {
-        const status = (p.latestSessionStatus || '').toLowerCase();
-        return ['active', 'onboarded', 'in_transit'].includes(status);
-      });
-    }
-
-    if (selectedTab === 'offboarded') {
-      return filteredPatients.filter(p => {
-        const status = (p.latestSessionStatus || '').toLowerCase();
-        // Exclude patients that are inactive (is_active stored as numeric 0/1 or camelCase variants)
-        const isInactive = Number(p.is_active) === 0 || Number(p.isActive) === 0;
-        return status === 'offboarded' && !isInactive;
-      });
-    }
-
-    if (selectedTab === 'inactive') {
-      return filteredPatients.filter(p => Number(p.is_active) === 0 || Number(p.isActive) === 0);
-    }
-
-    return filteredPatients;
-  })();
+  const totalPages = Math.max(1, Math.ceil((pagination.total || 0) / PAGE_SIZE));
 
   const columns = [
     {
@@ -622,7 +536,7 @@ export const Patients = () => {
             </div>
             <div>
               <p className="text-sm text-secondary">Total Patients</p>
-              <p className="text-2xl font-bold">{patients.length}</p>
+              <p className="text-2xl font-bold">{counts.total}</p>
             </div>
           </div>
         </Card>
@@ -684,13 +598,14 @@ export const Patients = () => {
             <div className="flex items-center gap-3 flex-wrap">
               <Tabs
                 tabs={[
-                  { key: 'new', label: 'New' },
-                  { key: 'onboarded', label: 'Onboarded' },
-                  { key: 'offboarded', label: 'Offboarded' },
-                  { key: 'inactive', label: 'Inactive' }
+                  { key: 'all', label: `All (${counts.all})` },
+                  { key: 'new', label: `New (${counts.new})` },
+                  { key: 'onboarded', label: `Onboarded (${counts.onboarded})` },
+                  { key: 'offboarded', label: `Offboarded (${counts.offboarded})` },
+                  { key: 'inactive', label: `Inactive (${counts.inactive})` }
                 ]}
                 activeKey={selectedTab}
-                onChange={(k) => setSelectedTab(k)}
+                onChange={(k) => { setSelectedTab(k); setPage(1); }}
               />
             </div>
 
@@ -712,18 +627,47 @@ export const Patients = () => {
 
       {/* Patients Table */}
       {(user?.role !== 'superadmin' || selectedOrgId) && (
-        <Card>
-          <div className="p-6">
-            <Table
-              columns={columns}
-              data={tabFilteredPatients}
-              loading={loading}
-              onRowClick={handleViewDetails}
-              onRefresh={() => fetchPatients(true, selectedTab === 'inactive')}
-              isRefreshing={loading}
-            />
-          </div>
-        </Card>
+        <>
+          <Table
+            columns={columns}
+            data={patients}
+            loading={loading}
+            onRowClick={handleViewDetails}
+            onRefresh={() => fetchPatients()}
+            isRefreshing={loading}
+          />
+
+          {/* Pagination */}
+          {pagination.total > PAGE_SIZE && (
+            <Card className="p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-secondary">
+                  Showing {patients.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}
+                  –{(page - 1) * PAGE_SIZE + patients.length} of {pagination.total}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm">Page {page} of {totalPages}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!pagination.hasMore || loading}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Add/Edit Patient Modal */}
