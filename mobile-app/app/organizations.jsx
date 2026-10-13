@@ -36,6 +36,7 @@ import {
   Button,
   Card,
   Caption,
+  confirm,
   EmptyState,
   H3,
   Input,
@@ -48,7 +49,8 @@ import {
 const STATUS_TABS = [
   { value: 'active', label: 'Active' },
   { value: 'suspended', label: 'Suspended' },
-  { value: 'inactive', label: 'Inactive' },
+  // No 'inactive' tab: deactivate/suspend both write 'suspended' (never
+  // 'inactive'), so that filter would always come back empty.
 ];
 const TYPE_TABS = [
   { value: '', label: 'All types' },
@@ -112,36 +114,31 @@ export default function OrganizationsScreen() {
     );
   }
 
-  const onLifecycle = (org, action) => {
+  const onLifecycle = async (org, action) => {
     const verb =
       action === 'suspend' ? 'Suspend'
       : action === 'deactivate' ? 'Deactivate'
       : 'Activate';
-    Alert.alert(
-      `${verb} ${org.name}?`,
-      action === 'deactivate'
-        ? 'This stops all org activity. Existing data is preserved; you can activate again later.'
-        : action === 'suspend'
-        ? 'The org will be temporarily blocked from signing in.'
-        : 'Restore this organization.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: verb,
-          style: action === 'activate' ? 'default' : 'destructive',
-          onPress: async () => {
-            try {
-              if (action === 'suspend') await suspendOrganization(org.id);
-              else if (action === 'deactivate') await deactivateOrganization(org.id);
-              else await activateOrganization(org.id);
-              load();
-            } catch (e) {
-              Alert.alert('Failed', errorMessage(e));
-            }
-          },
-        },
-      ],
-    );
+    const ok = await confirm({
+      title: `${verb} ${org.name}?`,
+      message:
+        action === 'deactivate'
+          ? 'This stops all org activity. Existing data is preserved; you can activate again later.'
+          : action === 'suspend'
+          ? 'The org will be temporarily blocked from signing in.'
+          : 'Restore this organization.',
+      confirmLabel: verb,
+      destructive: action !== 'activate',
+    });
+    if (!ok) return;
+    try {
+      if (action === 'suspend') await suspendOrganization(org.id);
+      else if (action === 'deactivate') await deactivateOrganization(org.id);
+      else await activateOrganization(org.id);
+      load();
+    } catch (e) {
+      Alert.alert('Failed', errorMessage(e));
+    }
   };
 
   return (

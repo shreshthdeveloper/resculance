@@ -36,6 +36,7 @@ import {
   Button,
   Card,
   Caption,
+  confirm,
   EmptyState,
   H3,
   Input,
@@ -122,26 +123,21 @@ export default function PatientsScreen() {
     load(q, filter);
   }, [activeOrg?.id, isSuperadmin, gatedBySuperadminOrg, load, q, filter]);
 
-  const onArchive = (p) => {
-    Alert.alert(
-      'Archive patient?',
-      `${p.firstName} ${p.lastName ?? ''}'s record will be hidden from the active list. You can restore later.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Archive',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await archivePatient(p.id);
-              load(q, filter);
-            } catch (e) {
-              Alert.alert('Failed', errorMessage(e));
-            }
-          },
-        },
-      ],
-    );
+  const onArchive = async (p) => {
+    const ok = await confirm({
+      title: 'Archive patient?',
+      message: `${p.firstName} ${p.lastName ?? ''}'s record will be hidden from the active list. You can restore later.`,
+      confirmLabel: 'Archive',
+      destructive: true,
+      icon: 'archive-outline',
+    });
+    if (!ok) return;
+    try {
+      await archivePatient(p.id);
+      load(q, filter);
+    } catch (e) {
+      Alert.alert('Failed', errorMessage(e));
+    }
   };
 
   const onRestore = (p) => {

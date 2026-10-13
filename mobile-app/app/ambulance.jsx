@@ -200,7 +200,14 @@ export default function MyAmbulanceScreen() {
                 <Button
                   label="Onboard a patient"
                   icon={<Ionicons name="add-circle-outline" color="#fff" size={18} />}
-                  onPress={() => router.push('/onboard')}
+                  // Preselect this ambulance and jump straight to the
+                  // patient-pick step (ambulance-first flow).
+                  onPress={() =>
+                    router.push({
+                      pathname: '/onboard/select',
+                      params: { ambulanceId: String(item.id) },
+                    })
+                  }
                   fullWidth
                   style={{ marginTop: t.spacing.s4 }}
                 />

@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -25,6 +24,7 @@ import {
   BodyStrong,
   Card,
   Caption,
+  confirm,
   EmptyState,
   Screen,
   SkeletonRow,
@@ -128,21 +128,20 @@ export default function NotificationsScreen() {
           )}
           {items.length > 0 && (
             <Pressable
-              onPress={() =>
-                Alert.alert('Clear all', 'Delete every notification?', [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                      setItems([]);
-                      try {
-                        await deleteAllNotifications();
-                      } catch {}
-                    },
-                  },
-                ])
-              }
+              onPress={async () => {
+                const ok = await confirm({
+                  title: 'Clear all',
+                  message: 'Delete every notification?',
+                  confirmLabel: 'Delete',
+                  destructive: true,
+                  icon: 'trash-outline',
+                });
+                if (!ok) return;
+                setItems([]);
+                try {
+                  await deleteAllNotifications();
+                } catch {}
+              }}
               hitSlop={8}
             >
               <Small color={t.colors.error} style={{ fontWeight: '600' }}>

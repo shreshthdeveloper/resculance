@@ -187,7 +187,7 @@ const MANAGE_ITEMS = {
   // "Onboarding" matches the web sidebar's Onboarding section: a list of
   // currently active sessions (onboarded + in_transit) that opens the
   // ambulance console when tapped.
-  onboarding:     { label: 'Onboarding',     sub: 'Active ambulance console', icon: 'medkit',     route: '/onboardings' },
+  onboarding:     { label: 'Onboarding',     sub: 'Active ambulance console', icon: 'medkit',     route: '/onboard' },
 };
 
 export function getManageTiles(role) {

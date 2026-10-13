@@ -13,9 +13,11 @@ import {
   Button,
   Card,
   Caption,
+  confirm,
   Screen,
   SectionHeader,
   Small,
+  ThemeToggle,
 } from '../../src/ui';
 
 export default function ProfileScreen() {
@@ -25,11 +27,15 @@ export default function ProfileScreen() {
   const signOut = useAuth((s) => s.signOut);
   const manageTiles = getManageTiles(user?.role);
 
-  const onSignOut = () => {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
-    ]);
+  const onSignOut = async () => {
+    const ok = await confirm({
+      title: 'Sign out',
+      message: 'Are you sure you want to sign out?',
+      confirmLabel: 'Sign out',
+      destructive: true,
+      icon: 'log-out-outline',
+    });
+    if (ok) signOut();
   };
 
   if (!user) return null;
@@ -116,6 +122,13 @@ export default function ProfileScreen() {
             <Small>{user.organization.code}</Small>
           </Card>
         ) : null}
+
+        {/* Appearance — quick theme toggle here so it's one tap away (the
+            same control also lives in Settings). */}
+        <View>
+          <SectionHeader title="Appearance" />
+          <ThemeToggle />
+        </View>
 
         {/* Manage section. Sourced from src/lib/permissions.js so each
             role sees exactly what the web sidebar would show. */}

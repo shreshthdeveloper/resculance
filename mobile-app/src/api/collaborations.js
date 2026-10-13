@@ -51,6 +51,20 @@ export async function cancelCollaboration(id) {
   return res.data.data;
 }
 
+// PATCH /collaborations/partnerships/set — superadmin direct partnership
+// toggle (the tree/matrix manager on the web). data: { fleetId, hospitalId, active }.
+export async function setPartnership(data) {
+  const res = await api.patch('/collaborations/partnerships/set', data);
+  return res.data.data;
+}
+
+// PATCH /collaborations/partnerships/bulk — superadmin bulk toggle.
+// data: { pairs: [{ fleetId, hospitalId }], active }.
+export async function bulkSetPartnerships(data) {
+  const res = await api.patch('/collaborations/partnerships/bulk', data);
+  return res.data.data;
+}
+
 // GET /collaborations/partnerships/my — the active partnerships for the
 // caller's organization (hospitals see their fleets; fleets see their
 // hospitals).

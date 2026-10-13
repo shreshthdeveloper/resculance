@@ -154,14 +154,20 @@ export default function ActivityScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', gap: t.spacing.s2 }}>
               <Pill label="All users" active={userFilter === ''} onPress={() => setUserFilter('')} />
-              {users.slice(0, 30).map((u) => (
-                <Pill
-                  key={u.id}
-                  label={`${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || u.id}
-                  active={String(userFilter) === String(u.id)}
-                  onPress={() => setUserFilter(u.id)}
-                />
-              ))}
+              {/* /activities/users returns { user_id, user_name }. Drop the
+                  null bucket (system actions with no user) since there's no
+                  id to filter the log list by. */}
+              {users
+                .filter((u) => u.user_id)
+                .slice(0, 30)
+                .map((u) => (
+                  <Pill
+                    key={String(u.user_id)}
+                    label={u.user_name || u.user_id}
+                    active={String(userFilter) === String(u.user_id)}
+                    onPress={() => setUserFilter(u.user_id)}
+                  />
+                ))}
             </View>
           </ScrollView>
         ) : null}

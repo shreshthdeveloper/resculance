@@ -30,7 +30,7 @@ import {
 } from '../src/lib/pushNotifications';
 import { useAuth } from '../src/store/auth';
 import { useTheme } from '../src/theme';
-import { SplashScreen } from '../src/ui';
+import { ConfirmHost, SplashScreen } from '../src/ui';
 
 NativeSplash.preventAutoHideAsync().catch(() => {});
 
@@ -132,6 +132,7 @@ function Inner({ ready }) {
   if (!ready) return <SplashScreen />;
 
   return (
+    <>
     <Stack
       screenOptions={{
         headerShown: false,
@@ -153,8 +154,12 @@ function Inner({ ready }) {
         options={{ headerShown: true, title: 'New patient', ...headerStyles }}
       />
       <Stack.Screen
+        name="onboard/select"
+        options={{ headerShown: true, title: 'Select patient', ...headerStyles }}
+      />
+      <Stack.Screen
         name="onboard/[patientId]"
-        options={{ headerShown: true, title: 'Confirm onboarding', ...headerStyles }}
+        options={{ headerShown: true, title: 'Onboard patient', ...headerStyles }}
       />
       <Stack.Screen
         name="settings"
@@ -200,10 +205,6 @@ function Inner({ ready }) {
         name="permissions"
         options={{ headerShown: true, title: 'Permissions', ...headerStyles }}
       />
-      <Stack.Screen
-        name="onboardings"
-        options={{ headerShown: true, title: 'Onboarding', ...headerStyles }}
-      />
       {/* Ambulance + Alerts are reachable from Home / the top-bar bell —
           no longer bottom-tab destinations. Registered here so deep-links
           (push-notification tap, etc.) still work. */}
@@ -216,5 +217,7 @@ function Inner({ ready }) {
         options={{ headerShown: true, title: 'Alerts', ...headerStyles }}
       />
     </Stack>
+    <ConfirmHost />
+    </>
   );
 }

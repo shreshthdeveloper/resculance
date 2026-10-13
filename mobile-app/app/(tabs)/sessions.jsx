@@ -26,6 +26,7 @@ import {
   OrgPicker,
   OrgPickerEmpty,
   Screen,
+  ShareSessionModal,
   SkeletonRow,
   Small,
   toneForStatus,
@@ -41,6 +42,8 @@ export default function SessionsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState(null);
+  // Session currently being shared (drives the share modal). null = closed.
+  const [sharing, setSharing] = useState(null);
 
   // Superadmin needs to pick an org before the backend will return sessions
   // (it returns 400 otherwise). Skip the fetch until they do.
@@ -139,7 +142,6 @@ export default function SessionsScreen() {
       <FlatList
         contentContainerStyle={{
           padding: t.spacing.s5,
-          paddingTop: t.spacing.s4,
           gap: t.spacing.s3,
         }}
         data={gatedBySuperadminOrg || loading ? [] : items}
@@ -244,8 +246,15 @@ export default function SessionsScreen() {
             item={item}
             onPress={() => router.push(`/session/${item.id}`)}
             onOffboard={() => onQuickOffboard(item)}
+            onShare={() => setSharing(item)}
           />
         )}
+      />
+      <ShareSessionModal
+        visible={!!sharing}
+        sessionId={sharing?.id}
+        sessionCode={sharing?.session_code}
+        onClose={() => setSharing(null)}
       />
     </Screen>
   );
@@ -260,7 +269,8 @@ function SegmentedControl({ value, onChange, options }) {
         backgroundColor: t.colors.surfaceAlt,
         borderRadius: t.radius.xl,
         padding: 4,
-        marginVertical: t.spacing.s4,
+        // Spacing is governed by the list header's `gap` so the control
+        // lines up with the other tabs' top inset (no extra intrinsic margin).
       }}
     >
       {options.map((o) => {
@@ -288,8 +298,16 @@ function SegmentedControl({ value, onChange, options }) {
             ]}
           >
             <Small
+              numberOfLines={1}
               color={active ? t.colors.text : t.colors.textSecondary}
-              style={{ fontWeight: active ? '600' : '500' }}
+              // Real weighted font face instead of a `fontWeight` override:
+              // Inter loads as single-weight families, so fontWeight alone
+              // triggers iOS faux-bold, which measures at regular width and
+              // clips the last glyph.
+              weight={active ? t.fontFamily.bodySemibold : t.fontFamily.bodyMedium}
+              // includeFontPadding:false stops Android clipping glyph bottoms
+              // inside the single-line clamp.
+              style={{ includeFontPadding: false, lineHeight: 18 }}
             >
               {o.label}
             </Small>
@@ -300,7 +318,7 @@ function SegmentedControl({ value, onChange, options }) {
   );
 }
 
-function SessionRow({ item, onPress, onOffboard }) {
+function SessionRow({ item, onPress, onOffboard, onShare }) {
   const t = useTheme();
   const isActive = item.status === 'onboarded' || item.status === 'in_transit';
   return (
@@ -346,6 +364,29 @@ function SessionRow({ item, onPress, onOffboard }) {
               : ''}
           </Caption>
         </View>
+        {onShare ? (
+          <Pressable
+            onPress={(e) => {
+              // Don't let the row's onPress fire underneath.
+              e.stopPropagation?.();
+              onShare();
+            }}
+            hitSlop={8}
+            style={({ pressed }) => [
+              {
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: t.colors.surfaceAlt,
+              },
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Ionicons name="share-social-outline" size={17} color={t.colors.textSecondary} />
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Inline actions on active rows: View + Offboard, no detail dive

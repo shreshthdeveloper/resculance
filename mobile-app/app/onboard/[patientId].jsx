@@ -1,4 +1,6 @@
-// Step 2 — confirm onboarding. Pick ambulance + trip details, then POST.
+// Final onboarding step — confirm the (already-chosen) ambulance + patient,
+// pick the destination hospital, then POST. Mirrors the web "Onboard Patient"
+// modal: ambulance and patient are read-only summaries here.
 
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -11,7 +13,7 @@ import {
   ScrollView,
   View,
 } from 'react-native';
-import { getMyAmbulances } from '../../src/api/ambulances';
+import { getMyAmbulances, listAmbulancesForOrg } from '../../src/api/ambulances';
 import { errorMessage } from '../../src/api/client';
 import { listMyPartnerships } from '../../src/api/collaborations';
 import { getPatient, onboardPatient } from '../../src/api/patients';
@@ -25,7 +27,6 @@ import {
   Card,
   Caption,
   H2,
-  Input,
   Screen,
   SectionHeader,
   Skeleton,
@@ -60,25 +61,26 @@ export default function ConfirmOnboardScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const [pickup, setPickup] = useState('');
-  const [destination, setDestination] = useState('');
-  const [complaint, setComplaint] = useState('');
-  const [assessment, setAssessment] = useState('');
-
   useEffect(() => {
     (async () => {
       try {
-        const tasks = [getPatient(String(patientId)), getMyAmbulances()];
+        // Fetch ambulances the SAME way the Onboard tab does, or the unit
+        // the user just selected won't be in this list: superadmin →
+        // org-wide via /ambulances; everyone else → /my-ambulances.
+        const ambulancesPromise = isSuperadmin
+          ? listAmbulancesForOrg({ limit: 200 })
+          : getMyAmbulances();
+        const tasks = [getPatient(String(patientId)), ambulancesPromise];
         // Only fleets need the partner list — hospitals self-destination.
         if (isFleetContext && orgId) tasks.push(listMyPartnerships());
         const [p, ambs, partnerships] = await Promise.all(tasks);
 
         setPatient(p);
-        const usable = ambs.filter(
-          (a) => a.status === 'available' || a.status === 'active',
-        );
+        // Only 'available' units can accept a patient (backend rejects the
+        // rest), so the fallback selection must never land on a busy one.
+        const usable = ambs.filter((a) => a.status === 'available');
         setAmbulances(ambs);
-        // If we arrived with a pre-selected ambulanceId (from /onboardings),
+        // If we arrived with a pre-selected ambulanceId (from the Onboard tab),
         // honour it when it appears in the user's accessible list; else
         // fall back to the first usable / first available.
         const preselected = preselectedAmbulanceId
@@ -123,7 +125,7 @@ export default function ConfirmOnboardScreen() {
         setLoading(false);
       }
     })();
-  }, [patientId, router, preselectedAmbulanceId, isHospitalContext, isFleetContext, orgId]);
+  }, [patientId, router, preselectedAmbulanceId, isHospitalContext, isFleetContext, isSuperadmin, orgId]);
 
   const onConfirm = async () => {
     if (!selectedAmbId) {
@@ -147,10 +149,6 @@ export default function ConfirmOnboardScreen() {
       const r = await onboardPatient(String(patientId), {
         ambulanceId: selectedAmbId,
         destinationHospitalId,
-        pickupLocation: pickup.trim() || 'Current Location',
-        destinationLocation: destination.trim() || 'Hospital',
-        chiefComplaint: complaint.trim() || undefined,
-        initialAssessment: assessment.trim() || undefined,
       });
       router.replace(`/session/${r.sessionId}`);
     } catch (e) {
@@ -185,6 +183,10 @@ export default function ConfirmOnboardScreen() {
     );
   }
   if (!patient) return null;
+
+  // The ambulance is chosen upstream (ambulance-first flow); resolve it for
+  // the read-only summary.
+  const selectedAmb = ambulances.find((a) => a.id === selectedAmbId) ?? null;
 
   return (
     <Screen edges={['bottom']}>
@@ -249,72 +251,46 @@ export default function ConfirmOnboardScreen() {
             ) : null}
           </Card>
 
-          {/* Ambulance picker */}
+          {/* Ambulance — read-only. The unit is chosen on the previous
+              (ambulance-first) step, so this just confirms it. Mirrors the
+              web's read-only "Ambulance: …" summary in the Onboard modal. */}
           <View>
             <SectionHeader title="Ambulance" />
-            {ambulances.length === 0 ? (
+            {selectedAmb ? (
+              <Card padding="s4">
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: t.spacing.s3,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      backgroundColor: t.colors.primaryTint,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="car-sport" size={22} color={t.colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <BodyStrong numberOfLines={1}>{selectedAmb.ambulance_code}</BodyStrong>
+                    <Caption numberOfLines={1}>{selectedAmb.registration_number}</Caption>
+                  </View>
+                  <Badge
+                    label={(selectedAmb.status ?? 'unknown').replace('_', ' ')}
+                    tone={toneForStatus(selectedAmb.status)}
+                  />
+                </View>
+              </Card>
+            ) : (
               <Card padding="s4">
                 <Body color={t.colors.textSecondary}>No ambulance assigned to you.</Body>
               </Card>
-            ) : (
-              <View style={{ gap: t.spacing.s2 }}>
-                {ambulances.map((a) => {
-                  const active = selectedAmbId === a.id;
-                  return (
-                    <Pressable
-                      key={a.id}
-                      onPress={() => setSelectedAmbId(a.id)}
-                    >
-                      {({ pressed }) => (
-                        <Card
-                          padding="s4"
-                          style={[
-                            active
-                              ? {
-                                  borderColor: t.colors.primary,
-                                  borderWidth: 2,
-                                  padding: t.spacing.s4 - 1,
-                                }
-                              : null,
-                            pressed && { opacity: 0.85 },
-                          ]}
-                        >
-                          <View
-                            style={{
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              gap: t.spacing.s3,
-                            }}
-                          >
-                            <View
-                              style={{
-                                width: 22,
-                                height: 22,
-                                borderRadius: 11,
-                                borderWidth: 2,
-                                borderColor: active ? t.colors.primary : t.colors.border,
-                                backgroundColor: active ? t.colors.primary : 'transparent',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              {active && <Ionicons name="checkmark" size={14} color="#fff" />}
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <BodyStrong>{a.ambulance_code}</BodyStrong>
-                              <Caption>{a.registration_number}</Caption>
-                            </View>
-                            <Badge
-                              label={(a.status ?? 'unknown').replace('_', ' ')}
-                              tone={toneForStatus(a.status)}
-                            />
-                          </View>
-                        </Card>
-                      )}
-                    </Pressable>
-                  );
-                })}
-              </View>
             )}
           </View>
 
@@ -398,37 +374,6 @@ export default function ConfirmOnboardScreen() {
               </Card>
             )}
           </View>
-
-          {/* Trip details */}
-          <Card padding="s5">
-            <SectionHeader title="Trip details" />
-            <Input
-              label="Pickup location"
-              value={pickup}
-              onChangeText={setPickup}
-              placeholder="e.g. 123 Main St"
-            />
-            <Input
-              label="Destination"
-              value={destination}
-              onChangeText={setDestination}
-              placeholder="e.g. ER bay 4"
-            />
-            <Input
-              label="Chief complaint"
-              value={complaint}
-              onChangeText={setComplaint}
-              multiline
-              placeholder="What is the primary issue?"
-            />
-            <Input
-              label="Initial assessment"
-              value={assessment}
-              onChangeText={setAssessment}
-              multiline
-              placeholder="Observed condition, ABC, vitals…"
-            />
-          </Card>
 
           <Button
             label="Onboard patient"

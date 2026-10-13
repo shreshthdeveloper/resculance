@@ -43,9 +43,11 @@ import {
   Button,
   Card,
   Caption,
+  confirm as confirmDialog,
   EmptyState,
   H3,
   Input,
+  notify,
   OrgPicker,
   OrgPickerEmpty,
   Screen,
@@ -328,17 +330,19 @@ export default function AmbulancesScreen() {
   );
 }
 
-function confirm(title, msg, fn, style) {
-  Alert.alert(title, msg ?? '', [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'Confirm',
-      style: style || 'default',
-      onPress: async () => {
-        try { await fn(); } catch (e) { Alert.alert('Failed', errorMessage(e)); }
-      },
-    },
-  ]);
+async function confirm(title, msg, fn, style) {
+  const ok = await confirmDialog({
+    title,
+    message: msg ?? '',
+    confirmLabel: 'Confirm',
+    destructive: style === 'destructive',
+  });
+  if (!ok) return;
+  try {
+    await fn();
+  } catch (e) {
+    notify({ title: 'Failed', message: errorMessage(e) });
+  }
 }
 
 function Pill({ label, active, onPress }) {

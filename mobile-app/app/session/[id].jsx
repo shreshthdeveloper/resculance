@@ -57,11 +57,14 @@ import {
   Button,
   Card,
   Caption,
+  confirm,
   H2,
   H3,
   Input,
   Screen,
   SectionHeader,
+  ShareSessionModal,
+  Skeleton,
   Small,
   toneForStatus,
 } from '../../src/ui';
@@ -96,6 +99,7 @@ export default function SessionDetailScreen() {
   const [showNoteSheet, setShowNoteSheet] = useState(false);
   const [showOffboardSheet, setShowOffboardSheet] = useState(false);
   const [offboarding, setOffboarding] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   // Ambulance Console hardware toggles. The web stores these in local
   // React state too — there's no backend endpoint to actually flip
   // siren/aircon/oxygen on a real vehicle yet. Keeping the same UI parity.
@@ -674,26 +678,25 @@ export default function SessionDetailScreen() {
     }
   };
 
-  const onDeleteData = (entry) => {
-    Alert.alert('Delete entry?', 'This removes the note or file from the session.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteSessionData(sessionId, entry.id);
-            setSessionData((prev) => ({
-              notes: prev.notes.filter((x) => String(x.id) !== String(entry.id)),
-              medications: prev.medications.filter((x) => String(x.id) !== String(entry.id)),
-              files: prev.files.filter((x) => String(x.id) !== String(entry.id)),
-            }));
-          } catch (e) {
-            Alert.alert('Failed', errorMessage(e));
-          }
-        },
-      },
-    ]);
+  const onDeleteData = async (entry) => {
+    const ok = await confirm({
+      title: 'Delete entry?',
+      message: 'This removes the note or file from the session.',
+      confirmLabel: 'Delete',
+      destructive: true,
+      icon: 'trash-outline',
+    });
+    if (!ok) return;
+    try {
+      await deleteSessionData(sessionId, entry.id);
+      setSessionData((prev) => ({
+        notes: prev.notes.filter((x) => String(x.id) !== String(entry.id)),
+        medications: prev.medications.filter((x) => String(x.id) !== String(entry.id)),
+        files: prev.files.filter((x) => String(x.id) !== String(entry.id)),
+      }));
+    } catch (e) {
+      Alert.alert('Failed', errorMessage(e));
+    }
   };
 
   const openFile = async (entry) => {
@@ -728,10 +731,48 @@ export default function SessionDetailScreen() {
   };
 
   if (loading) {
+    // Skeleton that mirrors the loaded layout (header strip + tab bar +
+    // console cards) so the page doesn't pop — same approach as the web.
     return (
-      <Screen>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={t.colors.primary} />
+      <Screen edges={['bottom']}>
+        <View
+          style={{
+            paddingHorizontal: t.spacing.s5,
+            paddingTop: t.spacing.s4,
+            paddingBottom: t.spacing.s3,
+            backgroundColor: t.colors.card,
+            borderBottomWidth: 1,
+            borderBottomColor: t.colors.border,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s3 }}>
+            <View style={{ flex: 1, gap: 6 }}>
+              <Skeleton width={90} height={10} />
+              <Skeleton width="55%" height={20} />
+            </View>
+            <Skeleton width={72} height={22} radius={11} />
+            <Skeleton width={38} height={38} radius={19} />
+          </View>
+        </View>
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: t.spacing.s5,
+            paddingHorizontal: t.spacing.s4,
+            paddingVertical: t.spacing.s3 + 4,
+            backgroundColor: t.colors.card,
+            borderBottomWidth: 1,
+            borderBottomColor: t.colors.border,
+          }}
+        >
+          {[56, 44, 64, 70].map((w, i) => (
+            <Skeleton key={i} width={w} height={14} />
+          ))}
+        </View>
+        <View style={{ padding: t.spacing.s4, gap: t.spacing.s3 }}>
+          <Skeleton width="100%" height={130} radius={t.radius.xl} />
+          <Skeleton width="100%" height={210} radius={t.radius.xl} />
+          <Skeleton width="100%" height={120} radius={t.radius.xl} />
         </View>
       </Screen>
     );
@@ -783,8 +824,32 @@ export default function SessionDetailScreen() {
             </H2>
           </View>
           <Badge label={(session.status ?? 'unknown').replace('_', ' ')} tone={toneForStatus(session.status)} dot />
+          <Pressable
+            onPress={() => setShowShare(true)}
+            hitSlop={8}
+            style={({ pressed }) => [
+              {
+                width: 38,
+                height: 38,
+                borderRadius: 19,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: t.colors.surfaceAlt,
+              },
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Ionicons name="share-social-outline" size={18} color={t.colors.text} />
+          </Pressable>
         </View>
       </View>
+
+      <ShareSessionModal
+        visible={showShare}
+        sessionId={session.id}
+        sessionCode={session.session_code}
+        onClose={() => setShowShare(false)}
+      />
 
       <Tabs
         value={tab}
@@ -1498,17 +1563,18 @@ function Tabs({ value, onChange, vitalCount, reportCount }) {
     { value: 'reports', label: `Reports${reportCount ? ` · ${reportCount}` : ''}` },
     { value: 'info', label: 'Info' },
   ];
-  // Horizontal scroll so 5 tabs don't squeeze each label on a small phone.
+  // 5 fixed tabs distributed evenly across the width — a plain flex row
+  // (not a horizontal ScrollView, whose cross-axis height is unreliable and
+  // was clipping the labels).
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
+    <View
       style={{
+        flexDirection: 'row',
         backgroundColor: t.colors.card,
         borderBottomWidth: 1,
         borderBottomColor: t.colors.border,
+        paddingHorizontal: t.spacing.s2,
       }}
-      contentContainerStyle={{ paddingHorizontal: t.spacing.s2 }}
     >
       {tabs.map((tb) => {
         const active = value === tb.value;
@@ -1518,7 +1584,8 @@ function Tabs({ value, onChange, vitalCount, reportCount }) {
             onPress={() => onChange(tb.value)}
             style={({ pressed }) => [
               {
-                paddingHorizontal: t.spacing.s4,
+                flex: 1,
+                paddingHorizontal: t.spacing.s1,
                 paddingVertical: t.spacing.s3 + 2,
                 alignItems: 'center',
                 borderBottomWidth: 2,
@@ -1528,15 +1595,22 @@ function Tabs({ value, onChange, vitalCount, reportCount }) {
             ]}
           >
             <Small
+              numberOfLines={1}
               color={active ? t.colors.primary : t.colors.textSecondary}
-              style={{ fontWeight: active ? '700' : '500' }}
+              // Switch the real weighted font face rather than a `fontWeight`
+              // style override — Inter is loaded as single-weight families, so
+              // fontWeight alone triggers iOS faux-bold (clips the last glyph).
+              weight={active ? t.fontFamily.bodyBold : t.fontFamily.bodyMedium}
+              // includeFontPadding:false + a roomier lineHeight stop Android
+              // from clipping the glyph bottoms inside the single-line clamp.
+              style={{ includeFontPadding: false, lineHeight: 18 }}
             >
               {tb.label}
             </Small>
           </Pressable>
         );
       })}
-    </ScrollView>
+    </View>
   );
 }
 

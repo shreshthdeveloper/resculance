@@ -40,9 +40,11 @@ import {
   Button,
   Card,
   Caption,
+  confirm as confirmDialog,
   EmptyState,
   H3,
   Input,
+  notify,
   OrgPicker,
   OrgPickerEmpty,
   Screen,
@@ -55,7 +57,8 @@ const STATUS_TABS = [
   { value: 'active', label: 'Active' },
   { value: 'pending_approval', label: 'Pending' },
   { value: 'suspended', label: 'Suspended' },
-  { value: 'inactive', label: 'Inactive' },
+  // No 'inactive' tab: user lifecycle actions only ever write 'suspended'
+  // (never 'inactive'), so that filter would always come back empty.
 ];
 
 const ROLES_FOR_FILTER = [
@@ -330,21 +333,19 @@ export default function UsersScreen() {
   );
 }
 
-function confirmDo(title, message, fn, style) {
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'Confirm',
-      style: style || 'default',
-      onPress: async () => {
-        try {
-          await fn();
-        } catch (e) {
-          Alert.alert('Failed', errorMessage(e));
-        }
-      },
-    },
-  ]);
+async function confirmDo(title, message, fn, style) {
+  const ok = await confirmDialog({
+    title,
+    message,
+    confirmLabel: 'Confirm',
+    destructive: style === 'destructive',
+  });
+  if (!ok) return;
+  try {
+    await fn();
+  } catch (e) {
+    notify({ title: 'Failed', message: errorMessage(e) });
+  }
 }
 
 function Pill({ label, active, onPress }) {

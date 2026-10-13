@@ -77,9 +77,21 @@ export async function offboardSession(id, treatmentNotes) {
   await api.patch(`/patients/sessions/${id}/offboard`, { treatmentNotes });
 }
 
+// POST /public/sessions/:id — PIN-gated read-only fetch. Deliberately NOT
+// behind auth on the backend; access is controlled by the superadmin-managed
+// share PIN. The PIN travels in the body, never the URL.
+export async function getPublicSession(sessionId, pin) {
+  const res = await api.post(`/public/sessions/${sessionId}`, { pin });
+  return res.data.data?.session ?? res.data.data;
+}
+
 export async function sendMessage(sessionId, input) {
   const res = await api.post(`/patients/sessions/${sessionId}/messages`, input);
-  return res.data.data;
+  const d = res.data.data ?? {};
+  // The HTTP response only carries `{ communicationId }` (the full row comes
+  // over the socket). Normalise to `id` so the caller's optimistic append —
+  // which guards on `sent?.id` — fires even when the socket echo is missed.
+  return { ...d, id: d.id ?? d.communicationId };
 }
 
 export async function listMessages(sessionId, limit = 100) {

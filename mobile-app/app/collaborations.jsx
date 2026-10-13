@@ -47,6 +47,7 @@ import {
   Input,
   Screen,
   SectionHeader,
+  SkeletonRow,
   Small,
   toneForStatus,
 } from '../src/ui';
@@ -168,8 +169,11 @@ export default function CollaborationsScreen() {
       </View>
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={t.colors.primary} />
+        <View style={{ paddingHorizontal: t.spacing.s5, gap: t.spacing.s3 }}>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
         </View>
       ) : (
         <FlatList

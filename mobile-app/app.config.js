@@ -13,6 +13,10 @@ function deriveSocketUrl(apiUrl) {
 module.exports = ({ config }) => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_URL;
   const socketUrl = process.env.EXPO_PUBLIC_SOCKET_URL || deriveSocketUrl(apiUrl);
+  // Origin of the web frontend — where public, read-only shared-session links
+  // resolve (`/sessions/:id`). Defaults to the API origin (same host serves
+  // both in production); override with EXPO_PUBLIC_WEB_URL for split hosting.
+  const webUrl = process.env.EXPO_PUBLIC_WEB_URL || deriveSocketUrl(apiUrl);
 
   return {
     ...config,
@@ -69,6 +73,7 @@ module.exports = ({ config }) => {
     extra: {
       apiUrl,
       socketUrl,
+      webUrl,
     },
   };
 };

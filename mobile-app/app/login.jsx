@@ -11,19 +11,16 @@ import {
   View,
 } from 'react-native';
 import { errorMessage } from '../src/api/client';
-import { API_URL } from '../src/lib/config';
 import { useAuth } from '../src/store/auth';
 import { useTheme } from '../src/theme';
 import {
   Body,
   Button,
-  Caption,
   Card,
   Display,
   Input,
   LogoMark,
   Screen,
-  Small,
 } from '../src/ui';
 
 export default function LoginScreen() {
@@ -122,13 +119,6 @@ export default function LoginScreen() {
               size="lg"
             />
           </Card>
-
-          <Caption
-            style={{ textAlign: 'center', marginTop: t.spacing.s6 }}
-            numberOfLines={1}
-          >
-            {API_URL}
-          </Caption>
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>

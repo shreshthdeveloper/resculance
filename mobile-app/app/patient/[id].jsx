@@ -3,7 +3,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, View } from 'react-native';
+import { Linking, Pressable, ScrollView, View } from 'react-native';
 import { errorMessage } from '../../src/api/client';
 import { getPatient, listPatientSessions } from '../../src/api/patients';
 import { listVitalSigns } from '../../src/api/sessions';
@@ -19,7 +19,8 @@ import {
   H3,
   Screen,
   SectionHeader,
-  Small,
+  Skeleton,
+  SkeletonRow,
   toneForStatus,
 } from '../../src/ui';
 
@@ -56,9 +57,20 @@ export default function PatientDetailScreen() {
   if (loading) {
     return (
       <Screen edges={['bottom']}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={t.colors.primary} />
-        </View>
+        <ScrollView contentContainerStyle={{ padding: t.spacing.s5, gap: t.spacing.s4 }}>
+          <Card padding="s5">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s3 }}>
+              <Skeleton width={56} height={56} radius={28} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Skeleton width="55%" height={20} />
+                <Skeleton width="40%" height={12} />
+              </View>
+            </View>
+          </Card>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </ScrollView>
       </Screen>
     );
   }
@@ -339,7 +351,6 @@ function ContactRow({ icon, label, value, onPress }) {
 }
 
 function VitalCell({ label, value }) {
-  const t = useTheme();
   return (
     <View>
       <Caption>{label}</Caption>
